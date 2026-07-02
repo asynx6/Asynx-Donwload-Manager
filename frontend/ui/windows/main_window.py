@@ -48,10 +48,23 @@ class MainWindow(ctk.CTkFrame):
         self._btn_settings = ctk.CTkButton(self._toolbar, text="⚙ " + t("btn.settings"), width=100, command=self._show_settings)
         self._btn_settings.grid(row=0, column=3, padx=(6, 12), pady=10)
 
+        # Scrollable list (create before filter so empty label exists)
+        self._list_frame = ctk.CTkScrollableFrame(self, fg_color=("#F5F5F5", "#1C1C1C"), corner_radius=12)
+        self._list_frame.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 12))
+        self._list_frame.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(2, weight=1)
+
+        # Empty label must exist before _apply_filter is called
+        self._empty_label = ctk.CTkLabel(
+            self._list_frame, text="No downloads", font=("Inter", 14), text_color=("#6B6B6B", "#9E9E9E")
+        )
+        self._empty_label.grid(row=0, column=0, pady=40)
+
         # Filter tabs
         self._tabs = ctk.CTkFrame(self, fg_color="transparent")
         self._tabs.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 6))
         self._tab_buttons = {}
+
         for i, key in enumerate(["all", "downloading", "paused", "completed"]):
             btn = ctk.CTkButton(
                 self._tabs, text=t(f"filter.{key}"), width=90, height=28,
@@ -60,18 +73,6 @@ class MainWindow(ctk.CTkFrame):
             btn.grid(row=0, column=i, padx=(0, 8))
             self._tab_buttons[key] = btn
         self._set_filter("all")
-
-        # Scrollable list
-        self._list_frame = ctk.CTkScrollableFrame(self, fg_color=("#F5F5F5", "#1C1C1C"), corner_radius=12)
-        self._list_frame.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 12))
-        self._list_frame.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(2, weight=1)
-
-        # Empty label
-        self._empty_label = ctk.CTkLabel(
-            self._list_frame, text="No downloads", font=("Inter", 14), text_color=("#6B6B6B", "#9E9E9E")
-        )
-        self._empty_label.grid(row=0, column=0, pady=40)
 
         # WebSocket progress callback
         self._api.set_progress_callback(self._on_progress)
