@@ -1,3 +1,6 @@
+import datetime
+import os
+import queue
 import threading
 import customtkinter as ctk
 
@@ -75,21 +78,26 @@ class MainWindow(ctk.CTkFrame):
         self._set_filter("all")
 
         # WebSocket progress callback
-        self._api.set_progress_callback(self._on_progress)
+        self._api.set_progress_callback(lambda data: self._schedule_ui(lambda d=data: self._on_progress(d)))
         self._api.start_ws()
 
-        # Load initial data
-        self._load_data()
-        self._load_settings()
+        # Thread-safe UI update queue
+        self._ui_queue: queue.Queue = queue.Queue()
+        self._process_ui_queue()
+
+        # Load initial data after the main loop is active
+        self.after(100, self._load_data)
+        self.after(200, self._load_settings)
 
         # Auto refresh fallback (jika WS gagal)
         self._poll()
+        self._start_state_heartbeat()
 
     def _load_data(self):
         def do_load():
             try:
                 data = self._api.list_downloads()
-                self.after(0, lambda: self._render(data))
+                self._schedule_ui(lambda: self._render(data))
             except Exception as exc:
                 print(f"[MainWindow] load failed: {exc}")
         threading.Thread(target=do_load, daemon=True).start()
@@ -168,6 +176,41 @@ class MainWindow(ctk.CTkFrame):
             except Exception as exc:
                 print(f"[MainWindow] settings load failed: {exc}")
         threading.Thread(target=do_load, daemon=True).start()
+
+    def _schedule_ui(self, callback):
+        """Jadwalkan callback ke main thread Tkinter dengan aman via queue."""
+        self._ui_queue.put(callback)
+
+    def _process_ui_queue(self):
+        """Proses callback UI dari queue di main thread."""
+        try:
+            while True:
+                callback = self._ui_queue.get_nowait()
+                try:
+                    callback()
+                except Exception as exc:
+                    print(f"[MainWindow] UI callback error: {exc}")
+        except queue.Empty:
+            pass
+        self.after(100, self._process_ui_queue)
+
+    def _start_state_heartbeat(self):
+        """Tulis state window ke log agar debugging startup lebih mudah."""
+        def _beat():
+            try:
+                log_dir = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "AsynxDL", "logs")
+                os.makedirs(log_dir, exist_ok=True)
+                state_path = os.path.join(log_dir, "state.log")
+                root = self.winfo_toplevel()
+                state = root.state()
+                geom = root.geometry()
+                mapped = root.winfo_ismapped()
+                with open(state_path, "a", encoding="utf-8") as f:
+                    f.write(f"{datetime.datetime.now().isoformat()} state={state} geometry={geom} mapped={mapped}\n")
+            except Exception as exc:
+                print(f"[MainWindow] state heartbeat failed: {exc}")
+            self.after(1000, _beat)
+        self.after(1000, _beat)
 
     def refresh(self):
         self._load_data()

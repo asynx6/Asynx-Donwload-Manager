@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.api.server import start_server_thread
 from backend.system.config import is_first_run, load_config
-from backend.system.crash_logger import run_with_crash_logging
+from backend.system.crash_logger import install_crash_handler, redirect_streams_to_log, run_with_crash_logging
 from backend.system.tray import TrayIcon
 from frontend.ui.app import AsynxDLApp
 from frontend.ui.windows.first_run_wizard import FirstRunWizard
@@ -59,6 +59,13 @@ def main():
     # Inisialisasi UI root
     app = AsynxDLApp(minimized=args.minimized)
 
+    # Force window to be visible and on top briefly at startup
+    if not args.minimized:
+        app._root.attributes("-topmost", True)
+        app.show_window()
+        app._root.update_idletasks()
+        app._root.after(500, lambda: app._root.attributes("-topmost", False))
+
     # First-run wizard
     if is_first_run() or args.first_run:
         def on_finish():
@@ -71,4 +78,6 @@ def main():
 
 
 if __name__ == "__main__":
+    install_crash_handler()
+    redirect_streams_to_log()
     run_with_crash_logging(main)

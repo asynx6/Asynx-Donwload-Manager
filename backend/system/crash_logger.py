@@ -79,3 +79,58 @@ def run_with_crash_logging(target, *args, **kwargs):
     except Exception:
         _write_crash_report(*sys.exc_info())
         raise
+
+
+class _LogStream:
+    """Wrapper sederhana untuk mengalihkan stdout/stderr ke file log."""
+
+    def __init__(self, path: str, original):
+        self._path = path
+        self._original = original
+        self._buffer = []
+
+    def _write_line(self, line: str):
+        try:
+            with open(self._path, "a", encoding="utf-8") as f:
+                f.write(line)
+                if not line.endswith("\n"):
+                    f.write("\n")
+        except Exception:
+            pass
+
+    def write(self, data: str):
+        try:
+            self._original.write(data)
+        except Exception:
+            pass
+        try:
+            with open(self._path, "a", encoding="utf-8") as f:
+                f.write(data)
+        except Exception:
+            pass
+
+    def flush(self):
+        try:
+            self._original.flush()
+        except Exception:
+            pass
+
+    def __getattr__(self, name):
+        if self._original is None:
+            if name == "isatty":
+                return lambda: False
+            if name in ("fileno", "seekable", "readable", "writable"):
+                return lambda *args, **kwargs: False
+            raise AttributeError(name)
+        return getattr(self._original, name)
+
+
+def redirect_streams_to_log():
+    """Alihkan stdout dan stderr ke file log persisten."""
+    log_dir = _log_dir()
+    log_path = os.path.join(log_dir, "app.log")
+    try:
+        sys.stdout = _LogStream(log_path, sys.stdout)
+        sys.stderr = _LogStream(log_path, sys.stderr)
+    except Exception:
+        pass

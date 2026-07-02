@@ -25,8 +25,11 @@ Pre-built installer and portable executable are available in the [Releases](http
 
 | Package | Description |
 |--------|-------------|
-| `dist/AsynxDL.exe` | Portable single-file executable |
+| `dist/AsynxDL.exe` | Portable single-file executable (no console) |
+| `dist/AsynxDL_Debug.exe` | Console version for debugging; run from cmd to see errors |
 | `dist/AsynxDL_Setup_v1.0.0.exe` | Windows installer with desktop shortcut & extension |
+
+> **Troubleshooting startup issues:** If `AsynxDL.exe` does not show a window, run `dist/AsynxDL_Debug.exe` from a terminal and check the log files in `%LOCALAPPDATA%\AsynxDL\logs\` (`app.log`, `crash-*.log`, `state.log`).
 
 ---
 
@@ -149,6 +152,31 @@ AsynxDL/
 ├── plan.md                  # Architecture blueprint
 ├── LICENSE                  # MIT License
 └── README.md                # This file
+```
+
+---
+
+## Troubleshooting
+
+### App starts but no window appears
+
+1. Check Task Manager for a process named `AsynxDL.exe`. If it exists, the app is running but the window may be off-screen or hidden.
+2. Run `dist/AsynxDL_Debug.exe` from PowerShell or CMD to see real-time output.
+3. Check the log directory:
+   ```
+   %LOCALAPPDATA%\AsynxDL\logs\
+   ```
+   - `app.log` — stdout/stderr output
+   - `crash-*.log` — uncaught Python exceptions
+   - `state.log` — window geometry and visibility state
+4. If the app is stuck, kill it from Task Manager and try again.
+
+### Uninstaller leaves files behind
+
+Run the installer again and choose **Uninstall**, or manually delete:
+```
+%LOCALAPPDATA%\AsynxDL\
+%APPDATA%\AsynxDL\
 ```
 
 ---
