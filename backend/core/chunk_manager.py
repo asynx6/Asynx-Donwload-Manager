@@ -60,14 +60,21 @@ def _get_content_length(url: str, session: requests.Session | None = None) -> in
 
 
 def _supports_range(url: str, session: requests.Session | None = None) -> bool:
-    """Check if the server advertises Accept-Ranges: bytes."""
+    """Check if the server actually supports byte ranges by sending a test Range request."""
     if session is None:
         session = _build_retry_session()
     try:
-        headers = {"User-Agent": _USER_AGENT}
-        resp = session.head(url, headers=headers, timeout=30, allow_redirects=True)
-        accept_ranges = resp.headers.get("Accept-Ranges", "").lower()
-        return accept_ranges == "bytes"
+        headers = {
+            "Range": "bytes=0-0",
+            "User-Agent": _USER_AGENT,
+        }
+        resp = session.get(url, headers=headers, timeout=30, allow_redirects=True, stream=True)
+        if resp.status_code == 206:
+            # Consume tiny body to close connection cleanly
+            _ = resp.content
+            return True
+        # If server returns 200 for the whole file, it does not honor ranges
+        return False
     except requests.RequestException:
         return False
 
@@ -176,19 +183,43 @@ def download_chunk(
 def probe_url(url: str) -> dict:
     """Probe a URL before download for size, range support, and filename."""
     session = _build_retry_session()
+    headers = {"User-Agent": _USER_AGENT}
+    content_length = 0
+    accept_ranges = False
+    content_type = None
+
+    # Try HEAD first
     try:
-        headers = {"User-Agent": _USER_AGENT}
         resp = session.head(url, headers=headers, timeout=30, allow_redirects=True)
         resp.raise_for_status()
         content_length = int(resp.headers.get("Content-Length", 0))
         accept_ranges = resp.headers.get("Accept-Ranges", "").lower() == "bytes"
         content_type = resp.headers.get("Content-Type")
-        filename = _extract_filename(url)
-        return {
-            "content_length": content_length,
-            "supports_range": accept_ranges,
-            "filename": filename,
-            "content_type": content_type,
-        }
-    except requests.RequestException as exc:
-        raise RuntimeError(f"Failed to probe URL {url}: {exc}") from exc
+    except requests.RequestException:
+        pass
+
+    # If HEAD failed or gave no length, try a GET and read just the headers
+    if content_length <= 0:
+        try:
+            resp = session.get(url, headers=headers, timeout=30, allow_redirects=True, stream=True)
+            resp.raise_for_status()
+            content_length = int(resp.headers.get("Content-Length", 0))
+            accept_ranges = resp.headers.get("Accept-Ranges", "").lower() == "bytes"
+            content_type = resp.headers.get("Content-Type")
+            # Close the connection without downloading the body
+            resp.close()
+        except requests.RequestException as exc:
+            raise RuntimeError(f"Failed to probe URL {url}: {exc}") from exc
+
+    # Validate range support by actually requesting a byte range
+    supports_range = False
+    if content_length > 0:
+        supports_range = _supports_range(url, session)
+
+    filename = _extract_filename(url)
+    return {
+        "content_length": content_length,
+        "supports_range": supports_range,
+        "filename": filename,
+        "content_type": content_type,
+    }

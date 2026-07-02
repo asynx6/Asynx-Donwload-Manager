@@ -24,7 +24,7 @@ class DownloadManager:
         self._active: dict[str, DownloadTask] = {}
         self._lock = threading.Lock()
         self._progress_callback: Optional[Callable[[dict], None]] = None
-        self._max_concurrent = 3
+        self._max_concurrent = load_config().get("max_concurrent_downloads", 3)
 
     def set_progress_callback(self, callback: Optional[Callable[[dict], None]]):
         self._progress_callback = callback

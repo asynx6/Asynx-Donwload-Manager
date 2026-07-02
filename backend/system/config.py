@@ -20,7 +20,7 @@ DEFAULT_CONFIG = {
     "max_concurrent_downloads": 3,
     "speed_limit_kbps": 0,
     "language": "en",
-    "theme": "light",
+    "theme": "dark",
     "run_on_startup": False,
     "first_run_completed": False,
 }

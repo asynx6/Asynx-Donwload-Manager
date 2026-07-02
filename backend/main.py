@@ -24,6 +24,16 @@ from frontend.ui.app import AsynxDLApp
 from frontend.ui.windows.first_run_wizard import FirstRunWizard
 
 
+def _is_another_instance_running(port: int) -> bool:
+    """Check whether another AsynxDL process is already serving the API port."""
+    try:
+        import requests
+        resp = requests.get(f"http://127.0.0.1:{port}/status", timeout=1.5)
+        return resp.status_code == 200
+    except Exception:
+        return False
+
+
 def _wait_for_backend(timeout: int = 10) -> bool:
     import requests
     config = load_config()
@@ -50,29 +60,34 @@ def main():
     config = load_config()
     port = config.get("api_port", 58296)
 
+    if _is_another_instance_running(port):
+        print("[WARN] AsynxDL is already running. Only one instance is allowed.")
+        sys.exit(0)
+
     # Start FastAPI server di thread daemon
     server_thread = start_server_thread(port=port)
     if not _wait_for_backend(timeout=10):
         print("[ERROR] Backend server tidak dapat di-start.")
         sys.exit(1)
 
-    # Inisialisasi UI root
-    app = AsynxDLApp(minimized=args.minimized)
-
-    # Force window to be visible and on top briefly at startup
-    if not args.minimized:
-        app._root.attributes("-topmost", True)
-        app.show_window()
-        app._root.update_idletasks()
-        app._root.after(500, lambda: app._root.attributes("-topmost", False))
+    # Inisialisasi UI root (window disembunyikan dulu)
+    needs_wizard = is_first_run() or args.first_run
+    app = AsynxDLApp(minimized=needs_wizard or args.minimized)
 
     # First-run wizard
-    if is_first_run() or args.first_run:
+    if needs_wizard:
         def on_finish():
             app.show_window()
+
         wizard = FirstRunWizard(app._root, on_finish=on_finish)
         wizard.grab_set()
         app._root.wait_window(wizard)
+        # Jika wizard ditutup sebelum selesai, tetap tampilkan window
+        if not load_config().get("first_run_completed"):
+            app.show_window()
+    elif not args.minimized:
+        # Pastikan window utama terlihat saat launch normal
+        app.show_window()
 
     app.run()
 

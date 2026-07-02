@@ -12,69 +12,57 @@ from frontend.ui.windows.settings_window import SettingsWindow
 
 
 class MainWindow(ctk.CTkFrame):
-    """Window utama aplikasi AsynxDL."""
+    """Window utama aplikasi AsynxDL dengan layout dashboard modern."""
+
+    # Design tokens
+    BG = ("#F4F5F7", "#0F0F13")
+    SIDEBAR_BG = ("#FFFFFF", "#141419")
+    CARD_BG = ("#FFFFFF", "#18181E")
+    TEXT_PRIMARY = ("#111827", "#F9FAFB")
+    TEXT_SECONDARY = ("#6B7280", "#9CA3AF")
+    ACCENT = "#6366F1"
+    ACCENT_HOVER = "#4F46E5"
 
     def __init__(self, master, api: APIClient, **kwargs):
-        super().__init__(master, fg_color="transparent", **kwargs)
+        super().__init__(master, fg_color=self.BG, **kwargs)
         self._api = api
         self._cards: dict[str, DownloadCard] = {}
         self._filter = "all"
         self._search = ""
         self._settings = {}
 
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        # Sidebar
+        self._sidebar = self._build_sidebar()
+        self._sidebar.grid(row=0, column=0, sticky="nsew", padx=(0, 0), pady=0)
+
+        # Main content
+        self._content = ctk.CTkFrame(self, fg_color="transparent")
+        self._content.grid(row=0, column=1, sticky="nsew", padx=16, pady=16)
+        self._content.grid_columnconfigure(0, weight=1)
+        self._content.grid_rowconfigure(1, weight=1)
 
         # Toolbar
-        self._toolbar = ctk.CTkFrame(self, height=50, fg_color=("#FFFFFF", "#2A2A2A"), corner_radius=12)
-        self._toolbar.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 6))
-        self._toolbar.grid_columnconfigure(0, weight=1)
-        self._toolbar.grid_columnconfigure(1, weight=0)
-        self._toolbar.grid_columnconfigure(2, weight=0)
-        self._toolbar.grid_propagate(False)
+        self._toolbar = self._build_toolbar()
+        self._toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 16))
 
-        self._title_label = ctk.CTkLabel(
-            self._toolbar, text=f"⬇  {t('app.title')} {t('app.version')}",
-            font=("Inter", 16, "bold")
+        # Scrollable list
+        self._list_frame = ctk.CTkScrollableFrame(
+            self._content, fg_color="transparent", corner_radius=0
         )
-        self._title_label.grid(row=0, column=0, sticky="w", padx=12, pady=10)
-
-        self._entry_search = ctk.CTkEntry(
-            self._toolbar, placeholder_text=t("toolbar.search_placeholder"), width=200
-        )
-        self._entry_search.grid(row=0, column=1, padx=6, pady=10)
-        self._entry_search.bind("<KeyRelease>", lambda e: self._on_search())
-
-        self._btn_add = ctk.CTkButton(self._toolbar, text="+ " + t("btn.add"), width=90, command=self._show_add)
-        self._btn_add.grid(row=0, column=2, padx=6, pady=10)
-
-        self._btn_settings = ctk.CTkButton(self._toolbar, text="⚙ " + t("btn.settings"), width=100, command=self._show_settings)
-        self._btn_settings.grid(row=0, column=3, padx=(6, 12), pady=10)
-
-        # Scrollable list (create before filter so empty label exists)
-        self._list_frame = ctk.CTkScrollableFrame(self, fg_color=("#F5F5F5", "#1C1C1C"), corner_radius=12)
-        self._list_frame.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 12))
+        self._list_frame.grid(row=1, column=0, sticky="nsew")
         self._list_frame.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(2, weight=1)
 
-        # Empty label must exist before _apply_filter is called
         self._empty_label = ctk.CTkLabel(
-            self._list_frame, text="No downloads", font=("Inter", 14), text_color=("#6B6B6B", "#9E9E9E")
+            self._list_frame,
+            text=t("empty.no_downloads"),
+            font=("Arial", 14),
+            text_color=self.TEXT_SECONDARY,
         )
-        self._empty_label.grid(row=0, column=0, pady=40)
+        self._empty_label.grid(row=0, column=0, pady=60)
 
-        # Filter tabs
-        self._tabs = ctk.CTkFrame(self, fg_color="transparent")
-        self._tabs.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 6))
-        self._tab_buttons = {}
-
-        for i, key in enumerate(["all", "downloading", "paused", "completed"]):
-            btn = ctk.CTkButton(
-                self._tabs, text=t(f"filter.{key}"), width=90, height=28,
-                command=lambda k=key: self._set_filter(k)
-            )
-            btn.grid(row=0, column=i, padx=(0, 8))
-            self._tab_buttons[key] = btn
         self._set_filter("all")
 
         # WebSocket progress callback
@@ -85,13 +73,154 @@ class MainWindow(ctk.CTkFrame):
         self._ui_queue: queue.Queue = queue.Queue()
         self._process_ui_queue()
 
-        # Load initial data after the main loop is active
         self.after(100, self._load_data)
         self.after(200, self._load_settings)
-
-        # Auto refresh fallback (jika WS gagal)
         self._poll()
         self._start_state_heartbeat()
+
+    def _build_sidebar(self) -> ctk.CTkFrame:
+        sidebar = ctk.CTkFrame(self, width=220, fg_color=self.SIDEBAR_BG, corner_radius=0)
+        sidebar.grid_rowconfigure(2, weight=1)
+        sidebar.grid_propagate(False)
+
+        # Brand
+        brand = ctk.CTkFrame(sidebar, fg_color="transparent")
+        brand.grid(row=0, column=0, sticky="ew", padx=20, pady=(24, 16))
+        logo = ctk.CTkLabel(
+            brand, text="A", font=("Arial", 24, "bold"), text_color=self.ACCENT
+        )
+        logo.grid(row=0, column=0)
+        title = ctk.CTkLabel(
+            brand, text=t("app.title"), font=("Arial", 18, "bold"),
+            text_color=self.TEXT_PRIMARY
+        )
+        title.grid(row=0, column=1, padx=(8, 0))
+
+        version = ctk.CTkLabel(
+            sidebar, text=t("app.version"), font=("Arial", 11),
+            text_color=self.TEXT_SECONDARY
+        )
+        version.grid(row=1, column=0, sticky="w", padx=20, pady=(0, 20))
+
+        # Filter tabs
+        tabs = ctk.CTkFrame(sidebar, fg_color="transparent")
+        tabs.grid(row=2, column=0, sticky="nsew", padx=14, pady=8)
+        tabs.grid_columnconfigure(0, weight=1)
+
+        self._tab_buttons = {}
+        tab_keys = [
+            ("all", "All"),
+            ("downloading", "Active"),
+            ("paused", "Paused"),
+            ("completed", "Done"),
+        ]
+        for i, (key, icon) in enumerate(tab_keys):
+            btn = ctk.CTkButton(
+                tabs,
+                text=f"{icon}  {t(f'filter.{key}')}",
+                anchor="w",
+                height=38,
+                corner_radius=10,
+                font=("Arial", 13),
+                fg_color="transparent",
+                text_color=self.TEXT_SECONDARY,
+                hover_color=("#E5E7EB", "#27272A"),
+                command=lambda k=key: self._set_filter(k),
+            )
+            btn.grid(row=i, column=0, sticky="ew", pady=4)
+            self._tab_buttons[key] = btn
+
+        # Bottom actions
+        bottom = ctk.CTkFrame(sidebar, fg_color="transparent")
+        bottom.grid(row=3, column=0, sticky="ew", padx=14, pady=(8, 20))
+        bottom.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkButton(
+            bottom,
+            text=f"{t('btn.settings')}",
+            anchor="w",
+            height=38,
+            corner_radius=10,
+            font=("Arial", 13),
+            fg_color="transparent",
+            text_color=self.TEXT_SECONDARY,
+            hover_color=("#E5E7EB", "#27272A"),
+            command=self._show_settings,
+        ).grid(row=0, column=0, sticky="ew", pady=4)
+
+        return sidebar
+
+    def _build_toolbar(self) -> ctk.CTkFrame:
+        toolbar = ctk.CTkFrame(self._content, fg_color="transparent")
+        toolbar.grid_columnconfigure(0, weight=1)
+
+        # Title + subtitle
+        header = ctk.CTkFrame(toolbar, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(
+            header,
+            text=t("toolbar.my_downloads"),
+            font=("Arial", 22, "bold"),
+            text_color=self.TEXT_PRIMARY,
+        ).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(
+            header,
+            text=t("toolbar.manage_downloads"),
+            font=("Arial", 12),
+            text_color=self.TEXT_SECONDARY,
+        ).grid(row=1, column=0, sticky="w")
+
+        # Right side controls
+        right = ctk.CTkFrame(toolbar, fg_color="transparent")
+        right.grid(row=0, column=1, sticky="e")
+
+        self._entry_search = ctk.CTkEntry(
+            right,
+            placeholder_text=t("toolbar.search_placeholder"),
+            width=220,
+            height=38,
+            corner_radius=10,
+            font=("Arial", 12),
+            border_width=1,
+        )
+        self._entry_search.grid(row=0, column=0, padx=(0, 10))
+        self._entry_search.bind("<KeyRelease>", lambda e: self._on_search())
+
+        self._btn_add = ctk.CTkButton(
+            right,
+            text=f"+  {t('btn.add')}",
+            width=130,
+            height=38,
+            corner_radius=10,
+            font=("Arial", 13, "bold"),
+            fg_color=self.ACCENT,
+            hover_color=self.ACCENT_HOVER,
+            command=self._show_add,
+        )
+        self._btn_add.grid(row=0, column=1)
+
+        return toolbar
+
+    def _set_filter(self, key: str):
+        self._filter = key
+        for k, btn in self._tab_buttons.items():
+            if k == key:
+                btn.configure(
+                    fg_color=self.ACCENT,
+                    text_color="white",
+                    hover_color=self.ACCENT_HOVER,
+                )
+            else:
+                btn.configure(
+                    fg_color="transparent",
+                    text_color=self.TEXT_SECONDARY,
+                    hover_color=("#E5E7EB", "#27272A"),
+                )
+        self._apply_filter()
+
+    def _on_search(self):
+        self._search = self._entry_search.get().strip().lower()
+        self._apply_filter()
 
     def _load_data(self):
         def do_load():
@@ -115,21 +244,7 @@ class MainWindow(ctk.CTkFrame):
         else:
             self._load_data()
 
-    def _on_search(self):
-        self._search = self._entry_search.get().strip().lower()
-        self._apply_filter()
-
-    def _set_filter(self, key: str):
-        self._filter = key
-        for k, btn in self._tab_buttons.items():
-            if k == key:
-                btn.configure(fg_color=("#5B6BF8", "#7B8BFF"))
-            else:
-                btn.configure(fg_color=["#3B8ED0", "#1F6AA5"])
-        self._apply_filter()
-
     def _render(self, items: list[dict]):
-        # Update existing cards or create new ones
         for item in items:
             task_id = item.get("id")
             if not task_id:
@@ -149,13 +264,13 @@ class MainWindow(ctk.CTkFrame):
             name = card._filename.lower()
             show = (self._filter == "all" or self._filter == status) and (self._search in name)
             if show:
-                card.grid(row=row, column=0, sticky="ew", padx=8, pady=6)
+                card.grid(row=row, column=0, sticky="ew", pady=8)
                 row += 1
                 visible += 1
             else:
                 card.grid_forget()
         if visible == 0:
-            self._empty_label.grid(row=0, column=0, pady=40)
+            self._empty_label.grid(row=0, column=0, pady=60)
         else:
             self._empty_label.grid_forget()
         self.update_idletasks()
@@ -178,11 +293,9 @@ class MainWindow(ctk.CTkFrame):
         threading.Thread(target=do_load, daemon=True).start()
 
     def _schedule_ui(self, callback):
-        """Jadwalkan callback ke main thread Tkinter dengan aman via queue."""
         self._ui_queue.put(callback)
 
     def _process_ui_queue(self):
-        """Proses callback UI dari queue di main thread."""
         try:
             while True:
                 callback = self._ui_queue.get_nowait()
@@ -195,7 +308,6 @@ class MainWindow(ctk.CTkFrame):
         self.after(100, self._process_ui_queue)
 
     def _start_state_heartbeat(self):
-        """Tulis state window ke log agar debugging startup lebih mudah."""
         def _beat():
             try:
                 log_dir = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "AsynxDL", "logs")

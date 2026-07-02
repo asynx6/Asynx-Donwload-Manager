@@ -190,10 +190,10 @@ class DownloadTask:
             if not supports_range:
                 thread_count = 1
             else:
-                # Skala: 1 thread per 10 MB, minimal 1, maksimal max_threads
+                # Skala: 1 thread per 50 MB, minimal 1, maksimal max_threads
                 thread_count = max(1, min(
                     self._max_threads,
-                    self._total_size // (10 * 1024 * 1024)
+                    self._total_size // (50 * 1024 * 1024)
                 ))
 
             # 5. Buat metadata
@@ -247,6 +247,7 @@ class DownloadTask:
                 self._task_id,
                 status="PAUSED",
                 graceful_exit=True,
+                downloaded_size=self._downloaded_size,
             )
 
         self._shutdown_executor()
@@ -258,7 +259,7 @@ class DownloadTask:
         - Load metadata dari disk (dapatkan byte offset per chunk).
         - Restart thread pool dengan Range yang sudah di-offset.
         """
-        if self._status != "PAUSED":
+        if self._status not in ("PAUSED", "ERROR"):
             return
         if not self._task_id:
             return
@@ -357,7 +358,7 @@ class DownloadTask:
                 idx = chunk["index"]
                 start = chunk["start"] + chunk.get("bytes_done", 0)
                 end = chunk["end"]
-                if start > end:
+                if start >= end:
                     # Chunk sudah selesai
                     continue
 
@@ -374,9 +375,10 @@ class DownloadTask:
                 )
                 self._futures.append((future, chunk))
 
-            # Progress flush timer: setiap ~500ms hitung kecepatan & update UI
+            # Progress flush timer: throttle metadata writes to disk
             self._last_progress_time = time.monotonic()
             self._last_downloaded = self._downloaded_size
+            self._last_meta_flush = 0.0
 
             # Monitor futures sampai semua selesai
             pending = {f for f, _ in self._futures}
@@ -392,6 +394,7 @@ class DownloadTask:
                 # Hitung total downloaded dari file .part di disk
                 self._update_downloaded_size_from_parts(chunks, final_path)
                 self._compute_speed()
+                self._throttled_meta_flush()
 
             # Tunggu sisa future yang belum selesai (atau cancel)
             for future, chunk in self._futures:
@@ -420,11 +423,17 @@ class DownloadTask:
                 pass
         self._downloaded_size = total
 
-        # Flush ke metadata secara berkala
-        if self._task_id:
-            self._meta_mgr.update(
-                self._task_id, downloaded_size=total
-            )
+    def _throttled_meta_flush(self):
+        """Write metadata to disk at most once per second to avoid I/O stalls."""
+        if not self._task_id:
+            return
+        now = time.monotonic()
+        if now - self._last_meta_flush < 1.0:
+            return
+        self._last_meta_flush = now
+        self._meta_mgr.update(
+            self._task_id, downloaded_size=self._downloaded_size
+        )
 
     def _compute_speed(self):
         """Hitung kecepatan download dalam KB/s."""

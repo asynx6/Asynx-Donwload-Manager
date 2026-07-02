@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends
 
 from backend.api.auth import verify_token
 from backend.api.models import SettingsModel
+from backend.api.state import manager
 from backend.system.config import load_config, save_config
 from backend.system.startup import set_startup
 
@@ -30,6 +31,10 @@ async def put_settings(settings: SettingsModel):
         del update["api_secret_token"]
     config.update(update)
     save_config(config)
+
+    # Apply runtime settings
+    if "max_concurrent_downloads" in update:
+        manager.set_max_concurrent(update["max_concurrent_downloads"])
 
     # Apply startup registry
     if "run_on_startup" in update:

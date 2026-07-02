@@ -7,7 +7,7 @@ import customtkinter as ctk
 from frontend.ui.api_client import APIClient
 from frontend.ui.i18n import set_language, t
 from frontend.ui.windows.main_window import MainWindow
-from backend.system.config import load_config, update_config, mark_first_run_completed
+from backend.system.config import load_config
 from backend.system.tray import TrayIcon
 
 
@@ -16,20 +16,29 @@ class AsynxDLApp:
 
     def __init__(self, minimized=False):
         self._root = ctk.CTk()
-        self._root.title("AsynxDL")
-        self._root.geometry("900x620")
-        self._root.minsize(760, 480)
+        self._root.title(t("app.title"))
+        self._root.geometry("1000x680")
+        self._root.minsize(860, 560)
 
         config = load_config()
         lang = config.get("language", "en")
-        theme = config.get("theme", "light")
+        theme = config.get("theme", "dark")
         set_language(lang)
         ctk.set_appearance_mode(theme)
-        ctk.set_default_color_theme("blue")
+        ctk.set_default_color_theme("dark-blue")
 
-        # Default font Inter jika tersedia, fallback Segoe UI
+        # Center window on screen
+        self._root.update_idletasks()
+        sw = self._root.winfo_screenwidth()
+        sh = self._root.winfo_screenheight()
+        w, h = 1000, 680
+        x = (sw - w) // 2
+        y = (sh - h) // 2
+        self._root.geometry(f"{w}x{h}+{x}+{y}")
+
+        # Use Arial as the default safe Windows font
         try:
-            self._root.option_add("*Font", "Inter")
+            self._root.option_add("*Font", "Arial")
         except tk.TclError:
             pass
 
@@ -65,6 +74,8 @@ class AsynxDLApp:
         self._root.deiconify()
         self._root.lift()
         self._root.focus_force()
+        self._root.attributes("-topmost", True)
+        self._root.after(300, lambda: self._root.attributes("-topmost", False))
 
     def hide_window(self):
         self._root.withdraw()
@@ -74,7 +85,6 @@ class AsynxDLApp:
         self._main._show_settings()
 
     def pause_all(self):
-        # Pause semua task via UI
         for card in self._main._cards.values():
             if card._status in ("DOWNLOADING", "PENDING"):
                 threading.Thread(target=self._api.pause, args=(card._task_id,), daemon=True).start()

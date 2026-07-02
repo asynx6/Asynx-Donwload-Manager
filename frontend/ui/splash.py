@@ -35,7 +35,7 @@ class SplashWindow:
         ctk.CTkLabel(
             self._root,
             text=title,
-            font=("Segoe UI", 24, "bold"),
+            font=("Arial", 24, "bold"),
             fg_color="#1E1E2E",
             text_color="#7B8BFF",
         ).pack(pady=(30, 10))
@@ -43,7 +43,7 @@ class SplashWindow:
         self._status = ctk.CTkLabel(
             self._root,
             text="Starting up...",
-            font=("Segoe UI", 11),
+            font=("Arial", 11),
             fg_color="#1E1E2E",
             text_color="#E0E0E0",
         )
@@ -56,7 +56,7 @@ class SplashWindow:
         ctk.CTkLabel(
             self._root,
             text="v1.0.0",
-            font=("Segoe UI", 9),
+            font=("Arial", 9),
             fg_color="#1E1E2E",
             text_color="#888888",
         ).pack(side="bottom", pady=10)

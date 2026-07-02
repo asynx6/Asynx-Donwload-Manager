@@ -2,15 +2,18 @@ import customtkinter as ctk
 
 
 class ProgressBar(ctk.CTkFrame):
-    """Progress bar dengan label persentase overlay."""
+    """Progress bar modern dengan label persentase overlay."""
 
     def __init__(self, master, height=18, *args, **kwargs):
-        super().__init__(master, height=height, *args, **kwargs)
-        self._progress = ctk.CTkProgressBar(self, height=height)
+        super().__init__(master, height=height, fg_color=("#E5E7EB", "#27272A"), corner_radius=height // 2, *args, **kwargs)
+        self._progress = ctk.CTkProgressBar(
+            self, height=height, corner_radius=height // 2,
+            fg_color=("#E5E7EB", "#27272A"), progress_color="#6366F1"
+        )
         self._progress.set(0.0)
         self._progress.pack(fill="both", expand=True)
         self._label = ctk.CTkLabel(
-            self, text="0%", font=("Inter", 11, "bold"), text_color="white"
+            self, text="0%", font=("Arial", 11, "bold"), text_color="white"
         )
         self._label.place(relx=0.5, rely=0.5, anchor="center")
 

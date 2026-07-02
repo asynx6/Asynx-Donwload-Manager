@@ -38,7 +38,12 @@
   "toolbar": {
     "search_placeholder": "Search downloads...",
     "add_tooltip": "Add new download",
-    "settings_tooltip": "Settings"
+    "settings_tooltip": "Settings",
+    "my_downloads": "My Downloads",
+    "manage_downloads": "Add links, manage queue, and track progress"
+  },
+  "empty": {
+    "no_downloads": "No downloads yet. Click + Add to start."
   },
   "card": {
     "speed": "Speed",
@@ -60,6 +65,7 @@
   },
   "wizard": {
     "welcome": "Welcome to AsynxDL",
+    "subtitle": "Let's set up your download manager in a few steps",
     "language": "Choose Language",
     "download_path": "Default Download Folder",
     "token_title": "Extension Token",
@@ -78,7 +84,8 @@
     "url": "URL",
     "filename": "Filename (optional)",
     "save_path": "Save to",
-    "speed_limit": "Speed Limit (KB/s, 0 = unlimited)"
+    "speed_limit": "Speed Limit (KB/s, 0 = unlimited)",
+    "speed_hint": "Leave 0 for no limit."
   },
   "errors": {
     "invalid_url": "Please enter a valid URL",

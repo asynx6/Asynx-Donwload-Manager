@@ -55,7 +55,7 @@ Pre-built installer and portable executable are available in the [Releases](http
 3. Choose whether to create a desktop shortcut.
 4. Launch **AsynxDL** from the Start Menu or desktop shortcut.
 
-> **Note:** On first launch, the app shows a setup wizard to choose language, default download folder, and copy the secret token for the browser extension.
+> **Note:** The installer installs the app to `%LOCALAPPDATA%\Programs\AsynxDL` and stores your settings in `%APPDATA%\AsynxDL`. On first launch, the app shows a setup wizard to choose language, default download folder, and copy the secret token for the browser extension.
 
 ### Option B: Portable Executable
 
@@ -173,8 +173,9 @@ AsynxDL/
 
 ### Uninstaller leaves files behind
 
-Run the installer again and choose **Uninstall**, or manually delete:
+If you still need to remove leftovers manually, delete:
 ```
+%LOCALAPPDATA%\Programs\AsynxDL\
 %LOCALAPPDATA%\AsynxDL\
 %APPDATA%\AsynxDL\
 ```

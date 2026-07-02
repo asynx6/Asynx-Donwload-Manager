@@ -38,7 +38,12 @@
   "toolbar": {
     "search_placeholder": "Cari unduhan...",
     "add_tooltip": "Tambah unduhan baru",
-    "settings_tooltip": "Pengaturan"
+    "settings_tooltip": "Pengaturan",
+    "my_downloads": "Unduhan Saya",
+    "manage_downloads": "Tambah link, kelola antrian, dan pantau progress"
+  },
+  "empty": {
+    "no_downloads": "Belum ada unduhan. Klik + Tambah untuk mulai."
   },
   "card": {
     "speed": "Kecepatan",
@@ -60,6 +65,7 @@
   },
   "wizard": {
     "welcome": "Selamat Datang di AsynxDL",
+    "subtitle": "Mari siapkan download manager-mu dalam beberapa langkah",
     "language": "Pilih Bahasa",
     "download_path": "Folder Unduhan Default",
     "token_title": "Token Ekstensi",
@@ -78,7 +84,8 @@
     "url": "URL",
     "filename": "Nama File (opsional)",
     "save_path": "Simpan ke",
-    "speed_limit": "Batas Kecepatan (KB/s, 0 = tidak terbatas)"
+    "speed_limit": "Batas Kecepatan (KB/s, 0 = tidak terbatas)",
+    "speed_hint": "Biarkan 0 untuk tanpa batas."
   },
   "errors": {
     "invalid_url": "Masukkan URL yang valid",
