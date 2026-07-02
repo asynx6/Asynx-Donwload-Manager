@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AsynxDL Extension Options</title>
+  <style>
+    body { font-family: Inter, Segoe UI, sans-serif; background: #f5f5f5; color: #1a1a1a; padding: 40px; }
+    .container { max-width: 480px; margin: 0 auto; background: white; padding: 24px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+    h1 { font-size: 20px; margin-top: 0; }
+    label { display: block; margin-bottom: 6px; font-weight: 600; font-size: 13px; color: #6b6b6b; }
+    input { width: 100%; padding: 10px; border: 1px solid #e0e0e0; border-radius: 8px; font-size: 14px; margin-bottom: 16px; }
+    button { background: #5b6bf8; color: white; border: none; border-radius: 8px; padding: 10px 18px; font-weight: 600; cursor: pointer; }
+    button:hover { background: #4a59d6; }
+    .status { margin-top: 12px; font-size: 13px; color: #2e7d32; font-weight: 600; }
+    .hint { font-size: 12px; color: #6b6b6b; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>AsynxDL Extension Setup</h1>
+    <label for="token">Secret Token</label>
+    <input type="text" id="token" placeholder="Paste token from AsynxDL desktop app">
+    <div class="hint">Open the AsynxDL desktop app, copy the token, and paste it here.</div>
+    <button id="save">Save Token</button>
+    <div id="status" class="status"></div>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>

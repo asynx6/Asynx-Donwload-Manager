@@ -1,0 +1,87 @@
+{
+  "app": {
+    "title": "AsynxDL",
+    "version": "v1.0.0"
+  },
+  "btn": {
+    "pause": "Jeda",
+    "resume": "Lanjut",
+    "cancel": "Batal",
+    "open_folder": "Buka Folder",
+    "run": "Jalankan",
+    "delete": "Hapus",
+    "retry": "Coba Lagi",
+    "add": "Tambah",
+    "settings": "Pengaturan",
+    "about": "Tentang",
+    "browse": "Telusuri",
+    "save": "Simpan",
+    "close": "Tutup",
+    "start": "Mulai Unduh",
+    "continue": "Lanjutkan"
+  },
+  "status": {
+    "downloading": "Mengunduh",
+    "paused": "Dijeda",
+    "completed": "Selesai",
+    "error": "Error",
+    "pending": "Menunggu",
+    "cancelled": "Dibatalkan",
+    "interrupted": "Terganggu"
+  },
+  "filter": {
+    "all": "Semua",
+    "downloading": "Mengunduh",
+    "paused": "Dijeda",
+    "completed": "Selesai"
+  },
+  "toolbar": {
+    "search_placeholder": "Cari unduhan...",
+    "add_tooltip": "Tambah unduhan baru",
+    "settings_tooltip": "Pengaturan"
+  },
+  "card": {
+    "speed": "Kecepatan",
+    "eta": "Sisa",
+    "of": "dari",
+    "unknown": "Tidak diketahui"
+  },
+  "settings": {
+    "title": "Pengaturan",
+    "default_path": "Folder Unduhan Default",
+    "speed_limit": "Batas Kecepatan",
+    "max_threads": "Maks Thread per Unduhan",
+    "max_concurrent": "Maks Unduhan Bersamaan",
+    "language": "Bahasa",
+    "theme": "Tema",
+    "run_startup": "Jalankan saat Windows Mulai",
+    "light": "Terang",
+    "dark": "Gelap"
+  },
+  "wizard": {
+    "welcome": "Selamat Datang di AsynxDL",
+    "language": "Pilih Bahasa",
+    "download_path": "Folder Unduhan Default",
+    "token_title": "Token Ekstensi",
+    "token_desc": "Salin token ini ke halaman pengaturan ekstensi untuk menghubungkan browser.",
+    "startup": "Jalankan AsynxDL saat Windows mulai",
+    "finish": "Mulai"
+  },
+  "tray": {
+    "show": "Tampilkan AsynxDL",
+    "pause_all": "Jeda Semua",
+    "settings": "Pengaturan",
+    "exit": "Keluar"
+  },
+  "add": {
+    "title": "Tambah Unduhan",
+    "url": "URL",
+    "filename": "Nama File (opsional)",
+    "save_path": "Simpan ke",
+    "speed_limit": "Batas Kecepatan (KB/s, 0 = tidak terbatas)"
+  },
+  "errors": {
+    "invalid_url": "Masukkan URL yang valid",
+    "backend_unreachable": "Backend tidak merespons"
+  }
+}

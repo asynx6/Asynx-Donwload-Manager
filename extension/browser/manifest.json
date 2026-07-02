@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "AsynxDL Interceptor",
+  "version": "1.0.0",
+  "description": "Intercept browser downloads and send them to AsynxDL desktop app.",
+  "permissions": ["downloads", "storage", "notifications"],
+  "host_permissions": ["http://127.0.0.1:58296/*"],
+  "background": { "service_worker": "background/service_worker.js" },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "assets/icons/icon16.png",
+      "48": "assets/icons/icon48.png",
+      "128": "assets/icons/icon128.png"
+    }
+  },
+  "options_page": "options/options.html",
+  "icons": {
+    "16": "assets/icons/icon16.png",
+    "48": "assets/icons/icon48.png",
+    "128": "assets/icons/icon128.png"
+  }
+}

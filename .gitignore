@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Runtime data — metadata queue
+data/queue/*.json
+!data/queue/.gitkeep
+
+# Download artifacts (test downloads)
+data/queue/*.part*
+*.part0
+*.part1
+*.part2
+*.part3
+*.part4
+*.part5
+*.part6
+*.part7
+
+# PyInstaller output
+dist/
+build/output/
+
+# OS
+Thumbs.db
+.DS_Store
+Desktop.ini

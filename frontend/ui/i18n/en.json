@@ -1,0 +1,87 @@
+{
+  "app": {
+    "title": "AsynxDL",
+    "version": "v1.0.0"
+  },
+  "btn": {
+    "pause": "Pause",
+    "resume": "Resume",
+    "cancel": "Cancel",
+    "open_folder": "Open Folder",
+    "run": "Run",
+    "delete": "Delete",
+    "retry": "Retry",
+    "add": "Add",
+    "settings": "Settings",
+    "about": "About",
+    "browse": "Browse",
+    "save": "Save",
+    "close": "Close",
+    "start": "Start Download",
+    "continue": "Continue"
+  },
+  "status": {
+    "downloading": "Downloading",
+    "paused": "Paused",
+    "completed": "Completed",
+    "error": "Error",
+    "pending": "Pending",
+    "cancelled": "Cancelled",
+    "interrupted": "Interrupted"
+  },
+  "filter": {
+    "all": "All",
+    "downloading": "Downloading",
+    "paused": "Paused",
+    "completed": "Completed"
+  },
+  "toolbar": {
+    "search_placeholder": "Search downloads...",
+    "add_tooltip": "Add new download",
+    "settings_tooltip": "Settings"
+  },
+  "card": {
+    "speed": "Speed",
+    "eta": "ETA",
+    "of": "of",
+    "unknown": "Unknown"
+  },
+  "settings": {
+    "title": "Settings",
+    "default_path": "Default Download Path",
+    "speed_limit": "Speed Limit",
+    "max_threads": "Max Threads per Download",
+    "max_concurrent": "Max Concurrent Downloads",
+    "language": "Language",
+    "theme": "Theme",
+    "run_startup": "Run on Windows Startup",
+    "light": "Light",
+    "dark": "Dark"
+  },
+  "wizard": {
+    "welcome": "Welcome to AsynxDL",
+    "language": "Choose Language",
+    "download_path": "Default Download Folder",
+    "token_title": "Extension Token",
+    "token_desc": "Copy this token into the extension options page to pair your browser.",
+    "startup": "Run AsynxDL when Windows starts",
+    "finish": "Get Started"
+  },
+  "tray": {
+    "show": "Show AsynxDL",
+    "pause_all": "Pause All",
+    "settings": "Settings",
+    "exit": "Exit"
+  },
+  "add": {
+    "title": "Add Download",
+    "url": "URL",
+    "filename": "Filename (optional)",
+    "save_path": "Save to",
+    "speed_limit": "Speed Limit (KB/s, 0 = unlimited)"
+  },
+  "errors": {
+    "invalid_url": "Please enter a valid URL",
+    "backend_unreachable": "Backend is not responding"
+  }
+}

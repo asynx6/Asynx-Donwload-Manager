@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="popup.css">
+  <title>AsynxDL — Confirm Download</title>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <span class="logo">⬇</span>
+      <h1>AsynxDL</h1>
+    </div>
+    <div id="content">
+      <div class="row">
+        <span class="label">File:</span>
+        <span id="filename" class="value">—</span>
+      </div>
+      <div class="row">
+        <span class="label">Size:</span>
+        <span id="size" class="value">—</span>
+      </div>
+      <div class="row">
+        <span class="label">Save to:</span>
+        <div class="path-row">
+          <span id="save-path" class="value">Downloads</span>
+          <button id="browse-btn" class="btn-ghost">Browse</button>
+        </div>
+      </div>
+      <div id="error" class="error"></div>
+      <div class="actions">
+        <button id="cancel-btn" class="btn-secondary">Cancel</button>
+        <button id="start-btn" class="btn-primary">Start Download</button>
+      </div>
+    </div>
+    <div id="success" class="success hidden">
+      <div class="checkmark">✓</div>
+      <p>Added to AsynxDL!</p>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

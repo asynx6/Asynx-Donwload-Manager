@@ -1,0 +1,69 @@
+"""
+AsynxDL — Downloads Routes
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+CRUD endpoint untuk download queue.
+"""
+
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+
+from backend.api.auth import verify_token
+from backend.api.models import AddDownloadRequest, DownloadItem
+from backend.api.state import manager
+
+router = APIRouter(dependencies=[Depends(verify_token)])
+
+
+@router.post("/add", response_model=DownloadItem)
+async def add_download(req: AddDownloadRequest):
+    result = manager.start_new(
+        url=req.url,
+        filename=req.filename or "",
+        save_path=req.save_path or "",
+        speed_limit_kbps=req.speed_limit_kbps or 0,
+    )
+    if "error" in result:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=409, detail=result["error"])
+    return DownloadItem(**result)
+
+
+@router.get("", response_model=list[DownloadItem])
+async def list_downloads():
+    return [DownloadItem(**item) for item in manager.get_all()]
+
+
+@router.get("/{task_id}", response_model=DownloadItem)
+async def get_download(task_id: str):
+    item = manager.get_one(task_id)
+    if not item:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Task not found")
+    return DownloadItem(**item)
+
+
+@router.patch("/{task_id}/pause")
+async def pause_download(task_id: str):
+    result = manager.pause(task_id)
+    if "error" in result:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@router.patch("/{task_id}/resume")
+async def resume_download(task_id: str):
+    result = manager.resume(task_id)
+    if "error" in result:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@router.delete("/{task_id}")
+async def delete_download(task_id: str, delete_parts: bool = True):
+    result = manager.delete(task_id, delete_parts=delete_parts)
+    if "error" in result:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
