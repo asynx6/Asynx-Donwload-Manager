@@ -26,6 +26,8 @@ def _write_crash_report(exc_type, exc_value, exc_tb) -> str:
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     log_path = os.path.join(log_dir, f"crash-{timestamp}.log")
 
+    tb_text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+
     lines = [
         "AsynxDL Crash Report",
         "=" * 40,
@@ -35,7 +37,7 @@ def _write_crash_report(exc_type, exc_value, exc_tb) -> str:
         f"Working directory: {os.getcwd()}",
         "-" * 40,
         "Traceback:",
-        traceback.format_exception(exc_type, exc_value, exc_tb),
+        tb_text,
         "=" * 40,
     ]
 
