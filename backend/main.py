@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.api.server import start_server_thread
 from backend.system.config import is_first_run, load_config
+from backend.system.crash_logger import run_with_crash_logging
 from backend.system.tray import TrayIcon
 from frontend.ui.app import AsynxDLApp
 from frontend.ui.windows.first_run_wizard import FirstRunWizard
@@ -70,4 +71,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_with_crash_logging(main)
