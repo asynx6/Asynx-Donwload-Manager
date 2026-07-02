@@ -46,7 +46,7 @@ testfile.bin
 dist/
 build/output/
 
-# OS
-Thumbs.db
-.DS_Store
-Desktop.ini
+# Temp files
+app_test.log
+is.exe
+*.log
