@@ -37,6 +37,10 @@ data/queue/*.part*
 *.part5
 *.part6
 *.part7
+testfile.bin
+
+#Openclaude
+.openclaude/
 
 # PyInstaller output
 dist/

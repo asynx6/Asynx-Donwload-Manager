@@ -1,11 +1,13 @@
 """
 AsynxDL — Chunk Manager Module
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Download satu chunk file via HTTP Range request.
-Mendukung stop event (pause), speed limiter, dan auto-retry.
+Download one chunk of a file via HTTP Range request.
+Supports stop event (pause), speed limiter, and auto-retry.
+Memory-optimized for 4GB RAM: small fixed buffer, no large in-memory buffers.
 
-Fungsi:
+Functions:
     - download_chunk(url, start, end, part_path, limiter, stop_event)
+    - probe_url(url)
 """
 
 import os
@@ -14,27 +16,23 @@ import time
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from urllib.parse import unquote, urlparse
 
 from .speed_limiter import SpeedLimiter
 
 
-# User-Agent yang digunakan untuk semua request HTTP
 _USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AsynxDL/1.0"
 
-# Ukuran buffer stream (64KB) — dioptimalkan untuk SSD dan RAM 4GB
-_CHUNK_BUFFER = 65536  # 64 KB
+# 64KB streaming buffer — keeps RAM low and avoids fragmentation
+_CHUNK_BUFFER = 64 * 1024
 
-# Konfigurasi retry
 _MAX_RETRIES = 5
-_RETRY_BACKOFF_FACTOR = 1.0  # delay = backoff * (2 ** (retries - 1))
+_RETRY_BACKOFF_FACTOR = 1.0
 _RETRY_STATUSES = [429, 500, 502, 503, 504]
 
 
 def _build_retry_session() -> requests.Session:
-    """Bangun requests.Session dengan retry strategy bawaan.
-
-    Session ini di-cache dalam download_chunk() via parameter opsional.
-    """
+    """Build a requests.Session with urllib3 retry strategy for transient errors."""
     session = requests.Session()
     retry_strategy = Retry(
         total=_MAX_RETRIES,
@@ -49,45 +47,25 @@ def _build_retry_session() -> requests.Session:
 
 
 def _get_content_length(url: str, session: requests.Session | None = None) -> int:
-    """Lakukan HEAD request untuk mendapatkan Content-Length.
-
-    Args:
-        url: URL file yang akan diunduh.
-        session: Session requests (opsional, dibuat baru jika tidak diberikan).
-
-    Returns:
-        Ukuran file dalam byte.
-
-    Raises:
-        ValueError: Jika header Content-Length tidak ditemukan.
-        requests.RequestException: Jika HEAD request gagal.
-    """
+    """Return Content-Length from a HEAD request."""
     if session is None:
         session = _build_retry_session()
     headers = {"User-Agent": _USER_AGENT}
-    resp = session.head(url, headers=headers, timeout=30)
+    resp = session.head(url, headers=headers, timeout=30, allow_redirects=True)
     resp.raise_for_status()
     content_length = resp.headers.get("Content-Length")
     if content_length is None:
-        raise ValueError("Server tidak menyediakan Content-Length header")
+        raise ValueError("Server did not provide Content-Length header")
     return int(content_length)
 
 
 def _supports_range(url: str, session: requests.Session | None = None) -> bool:
-    """Cek apakah server mendukung Range request.
-
-    Args:
-        url: URL file.
-        session: Session requests (opsional).
-
-    Returns:
-        True jika server mendukung Accept-Ranges: bytes.
-    """
+    """Check if the server advertises Accept-Ranges: bytes."""
     if session is None:
         session = _build_retry_session()
     try:
         headers = {"User-Agent": _USER_AGENT}
-        resp = session.head(url, headers=headers, timeout=30)
+        resp = session.head(url, headers=headers, timeout=30, allow_redirects=True)
         accept_ranges = resp.headers.get("Accept-Ranges", "").lower()
         return accept_ranges == "bytes"
     except requests.RequestException:
@@ -95,15 +73,7 @@ def _supports_range(url: str, session: requests.Session | None = None) -> bool:
 
 
 def _extract_filename(url: str) -> str:
-    """Ekstrak nama file dari URL.
-
-    Args:
-        url: URL file.
-
-    Returns:
-        Nama file dari bagian akhir URL path/query.
-    """
-    from urllib.parse import unquote, urlparse
+    """Extract a filename from the URL path."""
     path = urlparse(url).path
     filename = os.path.basename(path)
     if filename:
@@ -120,31 +90,25 @@ def download_chunk(
     stop_event: threading.Event,
     session: requests.Session | None = None,
 ) -> int:
-    """Download satu chunk file via HTTP Range request.
+    """Download a single byte range into a .part file.
 
-    Fungsi ini berjalan di thread terpisah. Setiap iterasi buffered,
-    memeriksa stop_event untuk pause/cancel, dan memanggil
-    limiter.throttle() untuk kontrol kecepatan.
-
-    Retry logic: requests.Session bawaan sudah menangani retry
-    untuk error transient (5xx, 429). Untuk error koneksi lain,
-    fungsi ini melakukan retry manual dengan exponential backoff.
+    Streaming, small buffer, manual retry for network errors, and responsive
+    to stop_event for pause/cancel. No large buffers are kept in memory.
 
     Args:
-        url: URL file sumber.
-        start: Byte offset awal (inklusif).
-        end: Byte offset akhir (inklusif).
-        part_path: Path file .part tempat menulis data.
-        limiter: SpeedLimiter instance untuk kontrol kecepatan.
-        stop_event: threading.Event — set True untuk pause/cancel.
-        session: requests.Session reuse (opsional).
+        url: source URL.
+        start: inclusive byte offset.
+        end: inclusive byte offset.
+        part_path: destination .part file path.
+        limiter: SpeedLimiter instance.
+        stop_event: threading.Event to stop early.
+        session: optional requests.Session (recommended for reuse).
 
     Returns:
-        Total byte yang berhasil diunduh untuk chunk ini.
+        bytes written for this chunk.
 
     Raises:
-        RuntimeError: Jika chunk gagal setelah semua retry.
-        OSError: Jika gagal menulis ke disk.
+        RuntimeError: if the chunk cannot be completed after retries.
     """
     if session is None:
         session = _build_retry_session()
@@ -153,62 +117,56 @@ def download_chunk(
         "Range": f"bytes={start}-{end}",
         "User-Agent": _USER_AGENT,
     }
-    chunk_size = end - start + 1
     bytes_done = 0
 
-    # Manual retry loop untuk menangani error yang tidak dicover oleh
-    # urllib3 Retry (misal: ChunkedEncodingError, timeout non-5xx)
+    # Ensure directory exists once
+    out_dir = os.path.dirname(part_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
     for attempt in range(1, _MAX_RETRIES + 1):
         if stop_event.is_set():
             return bytes_done
 
         try:
-            # Buka file di mode append binary
-            if attempt == 1:
-                os.makedirs(os.path.dirname(part_path), exist_ok=True)
-                # Mulai dari awal untuk attempt pertama
+            if attempt == 1 and not os.path.exists(part_path):
                 f = open(part_path, "wb")
                 bytes_done = 0
             else:
-                # Resume dari posisi terakhir jika retry
                 try:
                     bytes_done = os.path.getsize(part_path)
                 except OSError:
                     bytes_done = 0
                 f = open(part_path, "ab")
 
+            resume_start = start + bytes_done
+            if resume_start > end:
+                f.close()
+                return bytes_done
+            headers["Range"] = f"bytes={resume_start}-{end}"
+
             with f:
-                # Range header disesuaikan untuk resume
-                resume_start = start + bytes_done
-                if resume_start > end:
-                    # Chunk sudah selesai
-                    return bytes_done
-                headers["Range"] = f"bytes={resume_start}-{end}"
-
-                with session.get(url, headers=headers, stream=True,
-                                 timeout=30) as response:
+                with session.get(
+                    url, headers=headers, stream=True, timeout=30, allow_redirects=True
+                ) as response:
                     response.raise_for_status()
-
                     for data in response.iter_content(chunk_size=_CHUNK_BUFFER):
                         if stop_event.is_set():
                             return bytes_done
-
                         if data:
                             f.write(data)
                             data_len = len(data)
                             bytes_done += data_len
                             limiter.throttle(data_len)
 
-            # Download selesai untuk chunk ini
             return bytes_done
 
         except (requests.RequestException, OSError) as exc:
             if attempt == _MAX_RETRIES:
                 raise RuntimeError(
-                    f"Chunk {start}-{end} gagal setelah {_MAX_RETRIES} retry: {exc}"
+                    f"Chunk {start}-{end} failed after {_MAX_RETRIES} retries: {exc}"
                 ) from exc
-            # Exponential backoff: 1s, 2s, 4s, 8s, 16s
-            delay = _RETRY_BACKOFF_FACTOR * (2 ** (attempt - 1))
+            delay = min(_RETRY_BACKOFF_FACTOR * (2 ** (attempt - 1)), 30.0)
             if stop_event.wait(delay):
                 return bytes_done
 
@@ -216,22 +174,11 @@ def download_chunk(
 
 
 def probe_url(url: str) -> dict:
-    """Probe URL untuk mendapatkan info sebelum download.
-
-    Args:
-        url: URL file.
-
-    Returns:
-        Dict dengan keys:
-            - content_length: int (byte)
-            - supports_range: bool
-            - filename: str (dari URL)
-            - content_type: str | None
-    """
+    """Probe a URL before download for size, range support, and filename."""
     session = _build_retry_session()
     try:
         headers = {"User-Agent": _USER_AGENT}
-        resp = session.head(url, headers=headers, timeout=30)
+        resp = session.head(url, headers=headers, timeout=30, allow_redirects=True)
         resp.raise_for_status()
         content_length = int(resp.headers.get("Content-Length", 0))
         accept_ranges = resp.headers.get("Accept-Ranges", "").lower() == "bytes"
@@ -244,4 +191,4 @@ def probe_url(url: str) -> dict:
             "content_type": content_type,
         }
     except requests.RequestException as exc:
-        raise RuntimeError(f"Gagal probe URL {url}: {exc}") from exc
+        raise RuntimeError(f"Failed to probe URL {url}: {exc}") from exc

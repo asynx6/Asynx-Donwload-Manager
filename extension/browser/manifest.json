@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "AsynxDL Interceptor",
+  "name": "AsynxDL",
   "version": "1.0.0",
-  "description": "Intercept browser downloads and send them to AsynxDL desktop app.",
+  "description": "Send browser downloads to the AsynxDL desktop app for fast, resumable, multi-threaded downloading.",
   "permissions": ["downloads", "storage", "notifications"],
   "host_permissions": ["http://127.0.0.1:58296/*"],
   "background": { "service_worker": "background/service_worker.js" },

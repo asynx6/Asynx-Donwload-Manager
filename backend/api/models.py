@@ -5,14 +5,39 @@ Request/response schemas untuk API.
 """
 
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AddDownloadRequest(BaseModel):
     url: str
-    filename: Optional[str] = ""
-    save_path: Optional[str] = ""
-    speed_limit_kbps: Optional[int] = 0
+    filename: Optional[str] = Field(default="", max_length=200)
+    save_path: Optional[str] = Field(default="", max_length=260)
+    speed_limit_kbps: Optional[int] = Field(default=0, ge=0, le=1000000)
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, v: str) -> str:
+        if not v or not v.startswith(("http://", "https://")):
+            raise ValueError("URL must be a valid http:// or https:// address")
+        return v
+
+    @field_validator("filename")
+    @classmethod
+    def validate_filename(cls, v: Optional[str]) -> Optional[str]:
+        if v:
+            if ".." in v or v.count("/") > 0 or v.count("\\") > 0:
+                raise ValueError("Filename cannot contain directory traversal or path separators")
+            from backend.core.file_validator import sanitize_filename
+            return sanitize_filename(v)
+        return v
+
+    @field_validator("save_path")
+    @classmethod
+    def validate_save_path(cls, v: Optional[str]) -> Optional[str]:
+        if v:
+            from backend.core.file_validator import normalize_path
+            return normalize_path(v)
+        return v
 
 
 class DownloadItem(BaseModel):

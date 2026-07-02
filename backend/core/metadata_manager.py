@@ -11,10 +11,22 @@ Fungsi/Kelas:
 
 import json
 import os
+import re
 import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+def _is_safe_task_id(task_id: str) -> bool:
+    """Validate task_id as a UUID or simple alphanumeric-safe identifier.
+
+    This prevents path traversal or arbitrary file creation via malicious
+    task_id values.
+    """
+    if not task_id or len(task_id) > 80:
+        return False
+    return bool(re.fullmatch(r"[a-fA-F0-9\-]{8,80}", task_id))
 
 
 class MetadataManager:
@@ -38,6 +50,8 @@ class MetadataManager:
 
     def _metadata_path(self, task_id: str) -> Path:
         """Path file metadata untuk task_id tertentu."""
+        if not task_id or not _is_safe_task_id(task_id):
+            raise ValueError("Invalid task_id")
         return self._queue_dir / f"{task_id}.json"
 
     def create(self, url: str, filename: str, save_path: str,

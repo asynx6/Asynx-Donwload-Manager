@@ -1,7 +1,8 @@
 """
 AsynxDL — FastAPI Server
 ~~~~~~~~~~~~~~~~~~~~~~~~~
-Assembly FastAPI app, middleware, router, dan uvicorn runner.
+Assembly FastAPI app, middleware, router, and uvicorn runner.
+Hardened: only localhost, strict CORS, 127.0.0.1 binding.
 """
 
 import threading
@@ -21,10 +22,8 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        # Startup: recover state
         download_manager.recover()
         yield
-        # Shutdown
         download_manager.shutdown()
 
     app = FastAPI(title="AsynxDL", version="1.0.0", lifespan=lifespan)
@@ -34,6 +33,7 @@ def create_app() -> FastAPI:
         allow_origins=["http://127.0.0.1"],
         allow_methods=["GET", "POST", "PATCH", "DELETE", "PUT"],
         allow_headers=["X-AsynxDL-Token", "Content-Type"],
+        allow_credentials=False,
     )
 
     app.include_router(status.router)
@@ -51,10 +51,9 @@ def run_server(port: int = 58296, host: str = "127.0.0.1"):
 
 
 def start_server_thread(port: int = 58296) -> threading.Thread:
-    """Start uvicorn server di thread daemon."""
+    """Start uvicorn server in a daemon thread."""
     t = threading.Thread(target=run_server, args=(port,), daemon=True)
     t.start()
-    # Tunggu sebentar agar server ready
     time.sleep(1.0)
     return t
 

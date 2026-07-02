@@ -8,6 +8,8 @@ Fungsi:
     - check_disk_space(save_path, required_bytes) → bool
     - sanitize_filename(name) → str
     - resolve_duplicate_name(folder, filename) → str
+    - normalize_path(path) → str
+    - is_safe_path(base_dir, target_path) → bool
 """
 
 import os
@@ -19,23 +21,13 @@ _ILLEGAL_WIN = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 
 
 def check_disk_space(save_path: str, required_bytes: int) -> bool:
-    """Cek apakah drive target memiliki cukup ruang kosong (+5% buffer).
-
-    Args:
-        save_path: Path absolut file yang akan disimpan.
-        required_bytes: Ukuran file yang akan diunduh (byte).
-
-    Returns:
-        True jika cukup, False jika tidak cukup.
-    """
+    """Cek apakah drive target memiliki cukup ruang kosong (+5% buffer)."""
     drive = os.path.splitdrive(save_path)[0] or os.path.sep
     try:
         usage = shutil.disk_usage(drive)
         free = usage.free
     except OSError:
-        # Drive tidak bisa diakses (mis. network drive terputus)
         return False
-    # Buffer 5% untuk filesystem overhead dan metadata .json/.part
     return free >= int(required_bytes * 1.05)
 
 
@@ -47,17 +39,10 @@ def sanitize_filename(name: str) -> str:
         - Leading/trailing dots dan spasi di-strip
         - Nama file tidak boleh kosong (fallback "unnamed_file")
         - Panjang maksimum 200 karakter
-
-    Args:
-        name: Nama file mentah (dari URL atau user input).
-
-    Returns:
-        Nama file yang sudah dibersihkan.
     """
     if not name or not name.strip():
         return "unnamed_file"
     cleaned = re.sub(_ILLEGAL_WIN, '_', name)
-    # Strip dots dan spasi di awal/akhir
     cleaned = cleaned.strip('. ')
     if not cleaned:
         return "unnamed_file"
@@ -65,17 +50,7 @@ def sanitize_filename(name: str) -> str:
 
 
 def resolve_duplicate_name(folder: str, filename: str) -> str:
-    """Jika file sudah ada di folder, tambahkan suffix counter.
-
-    Contoh: file.zip → file (1).zip → file (2).zip
-
-    Args:
-        folder: Path folder tujuan.
-        filename: Nama file yang diinginkan.
-
-    Returns:
-        Nama file yang belum ada di folder (tanpa konflik).
-    """
+    """Jika file sudah ada di folder, tambahkan suffix counter."""
     base, ext = os.path.splitext(filename)
     target = os.path.join(folder, filename)
     if not os.path.exists(target):
@@ -86,3 +61,31 @@ def resolve_duplicate_name(folder: str, filename: str) -> str:
         if not os.path.exists(os.path.join(folder, candidate)):
             return candidate
         counter += 1
+
+
+def normalize_path(path: str) -> str:
+    """Normalisasi path user menjadi path absolut real.
+
+    - Expands environment variables (%USERPROFILE% etc)
+    - Expands user home (~)
+    - Resolves relative paths to absolute
+    - Resolves symlinks
+    """
+    if not path:
+        return os.path.expandvars(os.path.expanduser("~"))
+    expanded = os.path.expandvars(os.path.expanduser(path))
+    abs_path = os.path.abspath(expanded)
+    try:
+        return os.path.realpath(abs_path)
+    except OSError:
+        return abs_path
+
+
+def is_safe_path(base_dir: str, target_path: str) -> bool:
+    """Verifikasi bahwa target_path berada di dalam base_dir.
+
+    Mencegah path traversal (../../) pada file write operations.
+    """
+    base = os.path.abspath(normalize_path(base_dir))
+    target = os.path.abspath(normalize_path(target_path))
+    return os.path.commonpath([base, target]) == base

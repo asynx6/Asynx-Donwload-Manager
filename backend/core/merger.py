@@ -39,17 +39,28 @@ def merge_parts(part_files: list[str], output_path: str,
     if not part_files:
         return False
 
-    # Buat folder output jika belum ada
+    # Normalisasi dan keamanan path
+    output_path = os.path.abspath(os.path.expandvars(os.path.expanduser(output_path)))
     out_dir = os.path.dirname(output_path)
-    if out_dir:
-        os.makedirs(out_dir, exist_ok=True)
+    if not out_dir:
+        return False
+    os.makedirs(out_dir, exist_ok=True)
+
+    # Pastikan semua part file berada dalam folder yang sama (atau subfolder)
+    safe_base = os.path.abspath(out_dir)
+    for part_file in part_files:
+        part_abs = os.path.abspath(os.path.expandvars(os.path.expanduser(part_file)))
+        if not part_abs.startswith(safe_base + os.sep) and part_abs != safe_base:
+            print(f"[ERROR] Merger: part file outside output directory: {part_file}")
+            return False
 
     try:
         total_written = 0
         with open(output_path, "wb") as out:
             for part_file in part_files:
+                part_abs = os.path.abspath(os.path.expandvars(os.path.expanduser(part_file)))
                 try:
-                    with open(part_file, "rb") as src:
+                    with open(part_abs, "rb") as src:
                         while True:
                             chunk = src.read(_MERGE_BUFFER)
                             if not chunk:

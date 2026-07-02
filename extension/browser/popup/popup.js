@@ -8,17 +8,25 @@ async function getToken() {
 }
 
 function formatSize(bytes) {
-  if (bytes === 0) return 'Unknown';
+  if (!bytes || bytes === 0) return 'Unknown size';
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(1024));
   return parseFloat((bytes / Math.pow(1024, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function showError(msg) {
+  const el = document.getElementById('error');
+  el.textContent = msg;
+  el.style.color = '#dc2626';
 }
 
 async function init() {
   const res = await chrome.storage.session.get('asynxdl_intercept');
   const data = res.asynxdl_intercept;
   if (!data) {
-    document.getElementById('content').innerHTML = '<p class="error">No intercepted download found.</p>';
+    document.getElementById('content').classList.add('hidden');
+    document.getElementById('no-intercept').classList.remove('hidden');
+    document.getElementById('close-btn').addEventListener('click', () => window.close());
     return;
   }
   currentData = data;
@@ -32,14 +40,26 @@ async function init() {
   });
 
   document.getElementById('start-btn').addEventListener('click', startDownload);
+  document.getElementById('browse-btn').addEventListener('click', browsePath);
+}
+
+async function browsePath() {
+  // Chrome extension popup cannot show a real file picker.
+  // Show a simple prompt for the folder path.
+  const current = document.getElementById('save-path').textContent || '';
+  const value = window.prompt('Enter download folder path:', current);
+  if (value !== null) {
+    document.getElementById('save-path').textContent = value || 'Downloads';
+  }
 }
 
 async function startDownload() {
   const token = await getToken();
   if (!token) {
-    document.getElementById('error').textContent = 'Token not set. Open extension options.';
+    showError('Token not set. Open extension options and paste your AsynxDL token.');
     return;
   }
+  const savePath = document.getElementById('save-path').textContent || '';
   try {
     const resp = await fetch(`${API_HOST}/downloads/add`, {
       method: 'POST',
@@ -50,7 +70,7 @@ async function startDownload() {
       body: JSON.stringify({
         url: currentData.url,
         filename: currentData.filename,
-        save_path: ''
+        save_path: savePath === 'Downloads' ? '' : savePath
       })
     });
     if (!resp.ok) {
@@ -62,7 +82,7 @@ async function startDownload() {
     document.getElementById('success').classList.remove('hidden');
     setTimeout(() => window.close(), 1500);
   } catch (e) {
-    document.getElementById('error').textContent = 'Backend tidak merespons';
+    showError('Unable to reach AsynxDL. Make sure the desktop app is running.');
   }
 }
 

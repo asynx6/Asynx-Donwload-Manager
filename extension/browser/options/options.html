@@ -3,27 +3,106 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AsynxDL Extension Options</title>
+  <title>AsynxDL Extension — Options</title>
   <style>
-    body { font-family: Inter, Segoe UI, sans-serif; background: #f5f5f5; color: #1a1a1a; padding: 40px; }
-    .container { max-width: 480px; margin: 0 auto; background: white; padding: 24px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
-    h1 { font-size: 20px; margin-top: 0; }
-    label { display: block; margin-bottom: 6px; font-weight: 600; font-size: 13px; color: #6b6b6b; }
-    input { width: 100%; padding: 10px; border: 1px solid #e0e0e0; border-radius: 8px; font-size: 14px; margin-bottom: 16px; }
-    button { background: #5b6bf8; color: white; border: none; border-radius: 8px; padding: 10px 18px; font-weight: 600; cursor: pointer; }
-    button:hover { background: #4a59d6; }
-    .status { margin-top: 12px; font-size: 13px; color: #2e7d32; font-weight: 600; }
-    .hint { font-size: 12px; color: #6b6b6b; margin-top: 4px; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, sans-serif;
+      background: #f3f4f6;
+      color: #111827;
+      margin: 0;
+      padding: 32px;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 100vh;
+    }
+    .card {
+      width: 100%;
+      max-width: 480px;
+      background: #ffffff;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+      padding: 28px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .header img { width: 40px; height: 40px; }
+    .header h1 { font-size: 20px; margin: 0; }
+    .status {
+      margin-top: 12px;
+      font-size: 13px;
+      font-weight: 600;
+      min-height: 18px;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+    input {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      font-size: 14px;
+      margin-bottom: 8px;
+    }
+    input:focus {
+      outline: none;
+      border-color: #6366f1;
+    }
+    .hint {
+      font-size: 12px;
+      color: #6b7280;
+      margin-bottom: 16px;
+      line-height: 1.5;
+    }
+    button {
+      background: #4f46e5;
+      color: white;
+      border: none;
+      border-radius: 10px;
+      padding: 12px 20px;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover { background: #4338ca; }
+    .footer {
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid #f3f4f6;
+      font-size: 12px;
+      color: #9ca3af;
+    }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>AsynxDL Extension Setup</h1>
+  <div class="card">
+    <div class="header">
+      <img src="../assets/icons/icon48.png" alt="AsynxDL">
+      <h1>AsynxDL Extension</h1>
+    </div>
     <label for="token">Secret Token</label>
-    <input type="text" id="token" placeholder="Paste token from AsynxDL desktop app">
-    <div class="hint">Open the AsynxDL desktop app, copy the token, and paste it here.</div>
+    <input type="text" id="token" placeholder="Paste your AsynxDL desktop token">
+    <div class="hint">
+      Open the <strong>AsynxDL</strong> desktop app, copy the token from the first-run wizard or settings, then paste it here.
+    </div>
     <button id="save">Save Token</button>
     <div id="status" class="status"></div>
+    <div class="footer">
+      The extension will intercept browser downloads and relay them to the AsynxDL desktop app.
+    </div>
   </div>
   <script src="options.js"></script>
 </body>

@@ -9,20 +9,19 @@
 <body>
   <div class="container">
     <div class="header">
-      <span class="logo">⬇</span>
+      <img src="../assets/icons/icon48.png" alt="AsynxDL" class="logo">
       <h1>AsynxDL</h1>
     </div>
-    <div id="content">
-      <div class="row">
-        <span class="label">File:</span>
-        <span id="filename" class="value">—</span>
+    <div id="content" class="content">
+      <div class="file-row">
+        <div class="file-icon">📄</div>
+        <div class="file-info">
+          <div id="filename" class="filename">—</div>
+          <div id="size" class="size">Unknown size</div>
+        </div>
       </div>
       <div class="row">
-        <span class="label">Size:</span>
-        <span id="size" class="value">—</span>
-      </div>
-      <div class="row">
-        <span class="label">Save to:</span>
+        <span class="label">Save to</span>
         <div class="path-row">
           <span id="save-path" class="value">Downloads</span>
           <button id="browse-btn" class="btn-ghost">Browse</button>
@@ -36,7 +35,11 @@
     </div>
     <div id="success" class="success hidden">
       <div class="checkmark">✓</div>
-      <p>Added to AsynxDL!</p>
+      <p>Added to AsynxDL</p>
+    </div>
+    <div id="no-intercept" class="empty hidden">
+      <p>No intercepted download found.</p>
+      <button id="close-btn" class="btn-primary">Close</button>
     </div>
   </div>
   <script src="popup.js"></script>

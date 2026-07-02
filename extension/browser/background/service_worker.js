@@ -1,61 +1,78 @@
 /**
  * AsynxDL Browser Extension — Service Worker (MV3)
- * Intercepts downloads, cancels native Chrome download, and relays to backend.
+ * Intercepts browser downloads, cancels the native Chrome download, and relays
+ * the download to the AsynxDL desktop application via the local HTTP API.
  */
 
 const API_HOST = 'http://127.0.0.1:58296';
+const API_STATUS = `${API_HOST}/status`;
 
-chrome.downloads.onCreated.addListener(async (item) => {
-  // Skip jika item tidak memiliki URL/file yang jelas
-  if (!item.url || item.url.startsWith('data:') || item.url.startsWith('blob:')) {
-    return;
-  }
-  if (item.state !== 'in_progress') return;
+function isValidUrl(url) {
+  return url && (url.startsWith('http://') || url.startsWith('https://'));
+}
 
-  // Coba ping backend dulu
-  let backendOk = false;
+async function isBackendOnline() {
   try {
-    const resp = await fetch(`${API_HOST}/status`, { method: 'GET', signal: AbortSignal.timeout(3000) });
-    backendOk = resp.ok;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2500);
+    const resp = await fetch(API_STATUS, { method: 'GET', signal: controller.signal });
+    clearTimeout(timeout);
+    return resp.ok;
   } catch (e) {
-    backendOk = false;
+    return false;
   }
+}
 
-  if (!backendOk) {
-    // Fallback: biarkan Chrome download secara native
-    return;
-  }
-
-  // Cancel native download
+async function cancelNativeDownload(itemId) {
   try {
-    await chrome.downloads.cancel(item.id);
-    await chrome.downloads.erase({ id: item.id });
+    await chrome.downloads.cancel(itemId);
   } catch (e) {
-    console.warn('[AsynxDL] cancel native download failed', e);
+    console.warn('[AsynxDL] cancel failed', e);
   }
+  try {
+    await chrome.downloads.erase({ id: itemId });
+  } catch (e) {
+    // ignore
+  }
+}
 
-  // Simpan data ke storage session
-  const fileSize = item.totalBytes || item.fileSize || 0;
+async function storeInterceptedDownload(item) {
+  const filename = item.filename || item.url.split('/').pop() || 'unknown';
   const payload = {
     url: item.url,
-    filename: item.filename || item.url.split('/').pop() || 'unknown',
-    size: fileSize,
+    filename: filename.replace(/\\/g, '/').split('/').pop(),
+    size: item.totalBytes || item.fileSize || 0,
     suggestedSavePath: item.filename || ''
   };
   await chrome.storage.session.set({ asynxdl_intercept: payload });
+}
 
-  // Buka popup
+async function openExtensionPopup() {
   try {
     await chrome.action.openPopup();
   } catch (e) {
-    // Fallback: buka popup via window kecil jika openPopup tidak diizinkan
     chrome.windows.create({
       url: chrome.runtime.getURL('popup/popup.html'),
       type: 'popup',
-      width: 420,
-      height: 340
+      width: 380,
+      height: 360,
+      focused: true
     });
   }
+}
+
+chrome.downloads.onCreated.addListener(async (item) => {
+  if (!isValidUrl(item.url)) return;
+  if (item.state !== 'in_progress') return;
+
+  // Only intercept if the desktop app is running
+  if (!(await isBackendOnline())) {
+    return;
+  }
+
+  await cancelNativeDownload(item.id);
+  await storeInterceptedDownload(item);
+  await openExtensionPopup();
 });
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -65,4 +82,8 @@ chrome.runtime.onInstalled.addListener(() => {
       chrome.action.setBadgeBackgroundColor({ color: '#C62828' });
     }
   });
+});
+
+chrome.action.onClicked.addListener(() => {
+  openExtensionPopup();
 });

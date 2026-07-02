@@ -24,6 +24,8 @@ from .chunk_manager import (
 )
 from .file_validator import (
     check_disk_space,
+    is_safe_path,
+    normalize_path,
     sanitize_filename,
     resolve_duplicate_name,
 )
@@ -87,7 +89,7 @@ class DownloadTask:
         # Paths (di-resolve saat start())
         if not save_path:
             save_path = os.path.expandvars("%USERPROFILE%\\Downloads")
-        self._requested_save_path = save_path
+        self._requested_save_path = normalize_path(save_path)
         self._requested_filename = filename
 
         # Session HTTP (reuse connection pool)
@@ -166,12 +168,15 @@ class DownloadTask:
             # 2. Resolve filename dan path
             filename = self._requested_filename or url_filename
             filename = sanitize_filename(filename)
-            save_folder = os.path.expandvars(
-                os.path.expanduser(self._requested_save_path)
-            )
+            save_folder = self._requested_save_path
             os.makedirs(save_folder, exist_ok=True)
             filename = resolve_duplicate_name(save_folder, filename)
-            final_path = os.path.join(save_folder, filename)
+            final_path = normalize_path(os.path.join(save_folder, filename))
+            # Keamanan: file final harus berada di dalam folder yang diminta
+            if not is_safe_path(save_folder, final_path):
+                self._status = "ERROR"
+                self._broadcast_progress()
+                return
             self._filename = filename
             self._final_path = final_path
 
