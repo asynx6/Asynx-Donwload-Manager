@@ -1,277 +1,288 @@
+"""AsynxDL — DownloadCard (Brutalist W98 mono-grey).
+
+Square edges, no rounded badge, only greys. Tombol [Pause] / [Hapus] di kanan
+bawah, status text di kanan atas tanpa badge warna.
+"""
+
 import os
 import threading
+
 import customtkinter as ctk
 
+from frontend.ui import theme
 from frontend.ui.api_client import APIClient
-from frontend.ui.components.progress_bar import ProgressBar
 from frontend.ui.components.format_utils import format_size, format_speed, format_time
+from frontend.ui.components.progress_bar import ProgressBar
 from frontend.ui.components.confirm_dialog import ask_yes_no
 from frontend.ui.i18n import t
 
 
 class DownloadCard(ctk.CTkFrame):
-    """Kartu UI modern untuk satu item download."""
+    """Kartu UI Brutalist mono-grey."""
 
-    STATUS_COLORS = {
-        "DOWNLOADING": ("#6366F1", "#818CF8"),
-        "PAUSED":      ("#F59E0B", "#FBBF24"),
-        "COMPLETED":   ("#10B981", "#34D399"),
-        "ERROR":       ("#EF4444", "#F87171"),
-        "PENDING":     ("#6B7280", "#9CA3AF"),
-        "CANCELLED":   ("#6B7280", "#9CA3AF"),
-    }
-
-    BG = ("#FFFFFF", "#18181E")
-    TEXT_PRIMARY = ("#111827", "#F9FAFB")
-    TEXT_SECONDARY = ("#6B7280", "#9CA3AF")
-
-    def __init__(self, master, api: APIClient, data: dict, on_change=None, **kwargs):
-        super().__init__(master, corner_radius=16, fg_color=self.BG, **kwargs)
+    def __init__(self, master, api: APIClient, data: dict, on_change=None, mode: str = "light", **kwargs):
+        tk = theme.tokens(mode)
+        super().__init__(
+            master,
+            corner_radius=theme.CORNER_NONE,
+            fg_color=tk["BG3"],
+            border_width=1,
+            border_color=tk["BORDER"],
+            **kwargs,
+        )
+        self._mode = mode
+        self._tk = tk
         self._api = api
         self._data = data
         self._on_change = on_change
         self._task_id = data.get("id", "")
-
         self._filename = data.get("filename", data.get("url", "").split("/")[-1] or "unknown")
         self._status = data.get("status", "PENDING")
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=0)
 
-        # Header: icon + filename + badge
-        header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=0, column=0, columnspan=2, sticky="ew", padx=18, pady=(16, 8))
-        header.grid_columnconfigure(1, weight=1)
-
-        self._icon_label = ctk.CTkLabel(
-            header, text="📥", font=("Arial", 18, "bold"),
-            text_color=self.STATUS_COLORS.get(self._status, self.STATUS_COLORS["PENDING"])[0]
-        )
-        self._icon_label.grid(row=0, column=0, sticky="w")
+        # Header: filename + status text (right) — no rounded icon
+        header = ctk.CTkFrame(self, fg_color="transparent", corner_radius=theme.CORNER_NONE)
+        header.grid(row=0, column=0, columnspan=2, sticky="ew", padx=14, pady=(12, 6))
+        header.grid_columnconfigure(0, weight=1)
 
         self._name_label = ctk.CTkLabel(
-            header, text=self._filename, font=("Arial", 14, "bold"),
-            anchor="w", text_color=self.TEXT_PRIMARY
+            header, text=self._filename, font=theme.font(12, bold=True),
+            anchor="w", text_color=tk["FG"]
         )
-        self._name_label.grid(row=0, column=1, sticky="ew", padx=(10, 12))
+        self._name_label.grid(row=0, column=0, sticky="ew")
 
-        self._status_badge = ctk.CTkLabel(
+        self._status_label = ctk.CTkLabel(
             header, text=self._status_text(),
-            font=("Arial", 11, "bold"), corner_radius=20,
-            fg_color=("#E5E7EB", "#27272A"),
-            text_color=self.STATUS_COLORS.get(self._status, self.STATUS_COLORS["PENDING"])[0],
-            padx=12, pady=4
+            font=theme.font(11, bold=True),
+            text_color=tk["FG2"],
         )
-        self._status_badge.grid(row=0, column=2, sticky="e")
+        self._status_label.grid(row=0, column=1, sticky="e", padx=(12, 0))
 
-        # Progress bar
-        self._progress = ProgressBar(self, height=18)
-        self._progress.grid(row=1, column=0, columnspan=2, sticky="ew", padx=18, pady=(4, 8))
+        # Progress bar — mono-grey fill
+        self._progress = ProgressBar(self, height=14, color=tk["PROGRESS"])
+        self._progress.grid(row=1, column=0, columnspan=2, sticky="ew", padx=14, pady=(0, 6))
 
         # Info row
-        info = ctk.CTkFrame(self, fg_color="transparent")
-        info.grid(row=2, column=0, columnspan=2, sticky="ew", padx=18, pady=(0, 10))
+        info = ctk.CTkFrame(self, fg_color="transparent", corner_radius=theme.CORNER_NONE)
+        info.grid(row=2, column=0, columnspan=2, sticky="ew", padx=14, pady=(0, 8))
         info.grid_columnconfigure(0, weight=1)
         info.grid_columnconfigure(1, weight=1)
         info.grid_columnconfigure(2, weight=1)
 
-        self._speed_label = ctk.CTkLabel(
-            info, text="", font=("Arial", 12), text_color=self.TEXT_SECONDARY
-        )
+        self._speed_label = ctk.CTkLabel(info, text="", font=theme.font(10), text_color=tk["FG2"])
         self._speed_label.grid(row=0, column=0, sticky="w")
-
-        self._size_label = ctk.CTkLabel(
-            info, text="", font=("Arial", 12), text_color=self.TEXT_SECONDARY
-        )
+        self._size_label  = ctk.CTkLabel(info, text="", font=theme.font(10), text_color=tk["FG2"])
         self._size_label.grid(row=0, column=1, sticky="w")
-
-        self._eta_label = ctk.CTkLabel(
-            info, text="", font=("Arial", 12), text_color=self.TEXT_SECONDARY
-        )
+        self._eta_label   = ctk.CTkLabel(info, text="", font=theme.font(10), text_color=tk["FG2"])
         self._eta_label.grid(row=0, column=2, sticky="e")
 
-        # Action buttons
-        self._btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self._btn_frame.grid(row=3, column=0, columnspan=2, sticky="ew", padx=18, pady=(0, 16))
+        # Action buttons — square, grey
+        self._btn_frame = ctk.CTkFrame(self, fg_color="transparent", corner_radius=theme.CORNER_NONE)
+        self._btn_frame.grid(row=3, column=0, columnspan=2, sticky="ew", padx=14, pady=(0, 12))
         self._btn_frame.grid_columnconfigure(0, weight=1)
-        self._btn_frame.grid_columnconfigure(1, weight=0)
 
         self._btn_action = ctk.CTkButton(
-            self._btn_frame, text=t("btn.pause"), width=100, height=34,
-            corner_radius=10, font=("Arial", 12, "bold"),
-            fg_color=("#E5E7EB", "#27272A"), text_color=self.TEXT_PRIMARY,
-            hover_color=("#D1D5DB", "#3F3F46"),
-            command=self._toggle_action
+            self._btn_frame, text=t("btn.pause"), width=90, height=theme.BUTTON_HEIGHT - 2,
+            corner_radius=theme.CORNER_NONE, font=theme.font(11, bold=True),
+            fg_color=tk["ACCENT"], hover_color=tk["ACCENT_H"], text_color=tk["SEL_FG"],
+            border_width=1, border_color=tk["BORDER2"],
+            command=self._toggle_action,
         )
-        self._btn_action.grid(row=0, column=0, sticky="w", padx=(0, 8))
+        self._btn_action.grid(row=0, column=0, sticky="w")
 
         self._btn_folder = ctk.CTkButton(
-            self._btn_frame, text=t("btn.open_folder"), width=110, height=34,
-            corner_radius=10, font=("Arial", 12),
-            fg_color="transparent", border_width=1,
-            text_color=("#6366F1", "#818CF8"),
-            hover_color=("#E0E7FF", "#312E81"),
-            command=self._open_folder
+            self._btn_frame, text=t("btn.open_folder"), width=110, height=theme.BUTTON_HEIGHT - 2,
+            corner_radius=theme.CORNER_NONE, font=theme.font(10),
+            fg_color="transparent", hover_color=tk["SEL_DEEP"], text_color=tk["FG"],
+            border_width=1, border_color=tk["BORDER"],
+            command=self._open_folder,
         )
-        self._btn_folder.grid(row=0, column=1, padx=8)
+        self._btn_folder.grid(row=0, column=1, padx=6)
         self._btn_folder.grid_remove()
 
         self._btn_run = ctk.CTkButton(
-            self._btn_frame, text=t("btn.run"), width=90, height=34,
-            corner_radius=10, font=("Arial", 12),
-            fg_color="transparent", border_width=1,
-            text_color=("#6366F1", "#818CF8"),
-            hover_color=("#E0E7FF", "#312E81"),
-            command=self._run_file
+            self._btn_frame, text=t("btn.run"), width=70, height=theme.BUTTON_HEIGHT - 2,
+            corner_radius=theme.CORNER_NONE, font=theme.font(10),
+            fg_color="transparent", hover_color=tk["SEL_DEEP"], text_color=tk["FG"],
+            border_width=1, border_color=tk["BORDER"],
+            command=self._run_file,
         )
-        self._btn_run.grid(row=0, column=2, padx=8)
+        self._btn_run.grid(row=0, column=2, padx=6)
         self._btn_run.grid_remove()
 
         self._btn_delete = ctk.CTkButton(
-            self._btn_frame, text=t("btn.delete"), width=90, height=34,
-            corner_radius=10, font=("Arial", 12),
-            fg_color=("#FEE2E2", "#3F1818"), text_color=("#DC2626", "#FCA5A5"),
-            hover_color=("#FECACA", "#522424"),
+            self._btn_frame, text=t("btn.delete"), width=80, height=theme.BUTTON_HEIGHT - 2,
+            corner_radius=theme.CORNER_NONE, font=theme.font(10, bold=True),
+            fg_color=tk["SEL_BG"], hover_color=tk["SEL_DEEP"], text_color=tk["SEL_FG"],
+            border_width=1, border_color=tk["BORDER2"],
             command=self._delete,
         )
-        self._btn_delete.grid(row=0, column=3, padx=(8, 0))
+        self._btn_delete.grid(row=0, column=3, padx=(6, 0))
 
-        # Hapus-dari-Riwayat: muncul hanya saat COMPLETED/ERROR/CANCELLED.
         self._btn_remove_history = ctk.CTkButton(
-            self._btn_frame, text=t("btn.remove_history", default="Remove from History"),
-            width=160, height=34,
-            corner_radius=10, font=("Arial", 12),
-            fg_color=("#E0E7FF", "#312E81"), text_color=("#4338CA", "#C7D2FE"),
-            hover_color=("#C7D2FE", "#3730A3"),
+            self._btn_frame, text=t("btn.remove_history", default="Hapus Riwayat"),
+            width=130, height=theme.BUTTON_HEIGHT - 2,
+            corner_radius=theme.CORNER_NONE, font=theme.font(10),
+            fg_color="transparent", hover_color=tk["SEL_DEEP"], text_color=tk["FG"],
+            border_width=1, border_color=tk["BORDER"],
             command=self._remove_history,
         )
-        self._btn_remove_history.grid(row=0, column=4, padx=(8, 0))
+        self._btn_remove_history.grid(row=0, column=4, padx=(6, 0))
         self._btn_remove_history.grid_remove()
 
         self.update_view(data)
 
-    def _status_text(self):
-        status = self._status.lower()
+    # ------------------------------------------------------------------ helpers
+
+    def _status_text(self) -> str:
+        status = (self._status or "").lower()
         if self._status == "PAUSED" and not self._data.get("graceful_exit", True):
             return t("status.interrupted")
         return t(f"status.{status}", default=self._status)
 
-    def update_view(self, data: dict):
+    def update_view(self, data: dict) -> None:
         self._data = data
         self._status = data.get("status", self._status)
 
-        self._status_badge.configure(text=self._status_text())
-        color_pair = self.STATUS_COLORS.get(self._status, self.STATUS_COLORS["PENDING"])
-        self._icon_label.configure(text_color=color_pair[0])
-        self._status_badge.configure(text_color=color_pair[0])
-        self._progress.set_color(color_pair[0])
+        self._status_label.configure(text=self._status_text())
 
         total = data.get("total_size", 0)
         downloaded = data.get("downloaded_size", 0)
         percent = data.get("percent", 0.0)
-        if total > 0 and percent == 0.0:
-            percent = min(100.0, downloaded / total * 100)
-        self._progress.set(percent)
+        if total > 0 and float(percent) == 0.0:
+            try:
+                percent = min(100.0, downloaded / total * 100)
+            except Exception:
+                percent = 0.0
+        try:
+            self._progress.set(float(percent))
+        except Exception:
+            pass
 
         speed = data.get("speed_kbps", 0.0)
         eta = data.get("eta_seconds", 0)
         if self._status == "DOWNLOADING":
-            self._speed_label.configure(text=format_speed(speed))
-            self._eta_label.configure(text=f"{format_time(eta)}")
+            try:
+                self._speed_label.configure(text=format_speed(speed))
+            except Exception:
+                pass
+            try:
+                self._eta_label.configure(text=format_time(eta))
+            except Exception:
+                pass
         elif self._status == "COMPLETED":
-            self._speed_label.configure(text=t("status.completed"))
-            self._eta_label.configure(text="")
+            try:
+                self._speed_label.configure(text=t("status.completed"))
+                self._eta_label.configure(text="")
+            except Exception:
+                pass
         elif self._status == "ERROR":
-            self._speed_label.configure(text=t("status.error"))
-            self._eta_label.configure(text="")
+            try:
+                self._speed_label.configure(text=t("status.error"))
+                self._eta_label.configure(text="")
+            except Exception:
+                pass
         else:
-            self._speed_label.configure(text="")
-            self._eta_label.configure(text="")
+            try:
+                self._speed_label.configure(text="")
+                self._eta_label.configure(text="")
+            except Exception:
+                pass
 
-        self._size_label.configure(text=f"{format_size(downloaded)} / {format_size(total)}")
+        try:
+            self._size_label.configure(text=f"{format_size(downloaded)} / {format_size(total)}")
+        except Exception:
+            pass
 
-        # Button states
         if self._status in ("DOWNLOADING", "PENDING"):
-            self._btn_action.configure(text=t("btn.pause"))
-            self._btn_action.grid()
+            try:
+                self._btn_action.configure(text=t("btn.pause"))
+                self._btn_action.grid()
+            except Exception:
+                pass
         elif self._status in ("PAUSED", "ERROR"):
-            self._btn_action.configure(
-                text=t("btn.resume" if self._status == "PAUSED" else "btn.retry")
-            )
-            self._btn_action.grid()
+            try:
+                self._btn_action.configure(text=t("btn.resume") if self._status == "PAUSED" else t("btn.retry"))
+                self._btn_action.grid()
+            except Exception:
+                pass
         else:
-            self._btn_action.grid_remove()
+            try:
+                self._btn_action.grid_remove()
+            except Exception:
+                pass
 
         if self._status == "COMPLETED":
-            self._btn_folder.grid()
-            self._btn_run.grid()
-        else:
-            self._btn_folder.grid_remove()
-            self._btn_run.grid_remove()
-
-        # Tombol Hapus dari Riwayat: visible saat status non-aktif.
-        if self._status in ("COMPLETED", "ERROR", "CANCELLED"):
-            self._btn_remove_history.grid()
-        else:
-            self._btn_remove_history.grid_remove()
-
-        self.update_idletasks()
-
-    def _toggle_action(self):
-        if self._status in ("DOWNLOADING", "PENDING"):
-            # Konfirmasi pause.
             try:
-                ok = ask_yes_no(
+                self._btn_folder.grid()
+                self._btn_run.grid()
+            except Exception:
+                pass
+        else:
+            try:
+                self._btn_folder.grid_remove()
+                self._btn_run.grid_remove()
+            except Exception:
+                pass
+
+        if self._status in ("COMPLETED", "ERROR", "CANCELLED"):
+            try:
+                self._btn_remove_history.grid()
+            except Exception:
+                pass
+        else:
+            try:
+                self._btn_remove_history.grid_remove()
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------ actions
+
+    def _toggle_action(self) -> None:
+        if self._status in ("DOWNLOADING", "PENDING"):
+            try:
+                if not ask_yes_no(
                     self.winfo_toplevel(),
                     title=t("dlg.pause.title", default="Pause Download?"),
                     message=t("dlg.pause.body",
-                              default=f"Pause \"{self._filename}\"?\nProgress will be saved."),
+                              default=f"Pause \"{self._filename}\"?\nProgress akan disimpan."),
                     danger=False,
-                )
+                ):
+                    return
             except Exception:
-                ok = True
-            if not ok:
-                return
+                pass
             threading.Thread(target=self._api.pause, args=(self._task_id,), daemon=True).start()
         elif self._status in ("PAUSED", "ERROR"):
             threading.Thread(target=self._api.resume, args=(self._task_id,), daemon=True).start()
 
-    def _open_folder(self):
+    def _open_folder(self) -> None:
         path = self._data.get("save_path", "")
         if path and os.path.exists(path):
             self._api.open_folder(path)
 
-    def _run_file(self):
+    def _run_file(self) -> None:
         path = self._data.get("save_path", "")
         if path and os.path.exists(path):
             self._api.run_file(path)
 
-    def _delete(self):
-        """Hapus download. Card instan hilang dari UI + konfirmasi danger.
-        Default v1.0.2: remove_from_history=True (full purge), supaya card
-        tidak muncul lagi dari folder completed/ pada poll berikutnya.
-        """
+    def _delete(self) -> None:
         try:
-            ok = ask_yes_no(
+            if not ask_yes_no(
                 self.winfo_toplevel(),
-                title=t("dlg.delete.title", default="Delete Download?"),
+                title=t("dlg.delete.title", default="Hapus Download?"),
                 message=t("dlg.delete.body",
-                          default=f"Permanently delete \"{self._filename}\" "
-                                  "and remove its history?\n\n"
-                                  "This action cannot be undone."),
-                yes_label=t("btn.delete", default="Delete"),
+                          default=f"Hapus permanen \"{self._filename}\" dan riwayatnya?\n\nTidak bisa dibatalkan."),
+                yes_label=t("btn.delete", default="Hapus"),
                 danger=True,
-            )
+            ):
+                return
         except Exception:
-            ok = True
-        if not ok:
-            return
-        task_id = self._task_id
+            pass
 
-        # Bug-1 fix: instan hapus card dari UI (sebelum HTTP round-trip).
-        # Master window akan discard orphan card di _render() berikutnya
-        # sehingga tidak ada "kedip" / card balik dari history.
-        def _vanish():
+        task_id = self._task_id
+        def _vanish() -> None:
             try:
                 self.destroy()
             except Exception:
@@ -280,37 +291,27 @@ class DownloadCard(ctk.CTkFrame):
             self.master.after(0, _vanish)
         except Exception:
             pass
-
-        def _do_delete():
-            result = self._api.delete(task_id, True, True)
-            if isinstance(result, dict) and result.get("error"):
-                # Kalau backend reject, restore by triggering parent refresh.
-                if self._on_change:
-                    try:
-                        self._on_change()
-                    except Exception:
-                        pass
+        def _do_delete() -> None:
+            try:
+                result = self._api.delete(task_id, True, True)
+                if isinstance(result, dict) and result.get("error") and self._on_change:
+                    self._on_change()
+            except Exception:
+                pass
         threading.Thread(target=_do_delete, daemon=True).start()
 
-    def _remove_history(self):
-        """Hapus permanen dari history (folder completed/) + bersihkan parts."""
+    def _remove_history(self) -> None:
         try:
-            ok = ask_yes_no(
+            if not ask_yes_no(
                 self.winfo_toplevel(),
-                title=t("dlg.remove_history.title", default="Remove from History?"),
+                title=t("dlg.remove_history.title", default="Hapus dari Riwayat?"),
                 message=t("dlg.remove_history.body",
-                          default=f"Remove \"{self._filename}\" from history?\n\n"
-                                  "Downloaded file (if any) will be kept on disk."),
+                          default=f"Hapus \"{self._filename}\" dari riwayat?\n\nFile hasil download (kalau ada) tidak dihapus dari disk."),
                 danger=True,
-            )
+            ):
+                return
         except Exception:
-            ok = True
-        if not ok:
-            return
-        threading.Thread(
-            target=self._api.remove_history,
-            args=(self._task_id, True),
-            daemon=True,
-        ).start()
+            pass
+        threading.Thread(target=self._api.remove_history, args=(self._task_id, True), daemon=True).start()
         if self._on_change:
             self._on_change()

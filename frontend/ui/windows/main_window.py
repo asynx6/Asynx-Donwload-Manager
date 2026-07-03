@@ -1,352 +1,207 @@
-import os
-import queue
-import threading
+"""AsynxDL — MainWindow.
+
+Kini tanpa sidebar, tanpa pengaturanWindow terpisah. Top: TabManager dengan
+tab Home (download list) dan tab Setting (settings panel). Branding: hanya
+satu logo kecil di sebelah kiri tab-bar (di-load dari C:\\Users\\asynx\\Downloads\\AsynxDL\\Logo.png
+atau fallback ke frontend/ui/assets/icons/logo.png).
+"""
+
 import datetime
+import os
+
 import customtkinter as ctk
 from PIL import Image
 
+from frontend.ui import theme
 from frontend.ui.api_client import APIClient
-from frontend.ui.components.download_card import DownloadCard
 from frontend.ui.i18n import t
-from frontend.ui.windows.add_download_window import AddDownloadWindow
-from frontend.ui.windows.settings_window import SettingsWindow
+from frontend.ui.windows.home_panel import HomePanel
+from frontend.ui.windows.settings_panel import SettingsPanel
 
 
-def _load_logo_image(size=40):
-    """Load the user-provided Logo.png (or generated logo.png) as a CTkImage."""
-    try:
-        for logo_name in ("logo.png", "tray.png"):
-            logo_path = os.path.join(os.path.dirname(__file__), "..", "assets", "icons", logo_name)
-            if os.path.exists(logo_path):
-                img = Image.open(logo_path)
+_LOCAL_LOGO_CANDIDATE = r"C:\Users\asynx\Downloads\AsynxDL\Logo.png"
+
+
+def _load_logo_image(size: int = 26):
+    candidates = [
+        _LOCAL_LOGO_CANDIDATE,
+        os.path.join(os.path.dirname(__file__), "..", "assets", "icons", "logo.png"),
+        os.path.join(os.path.dirname(__file__), "..", "assets", "icons", "logo.jpg"),
+        os.path.join(os.path.dirname(__file__), "..", "assets", "icons", "tray.png"),
+    ]
+    for path in candidates:
+        try:
+            if path and os.path.exists(path):
+                img = Image.open(path)
                 return ctk.CTkImage(img, size=(size, size))
-    except Exception:
-        pass
+        except Exception:
+            continue
     return None
 
 
 class MainWindow(ctk.CTkFrame):
-    """Window utama aplikasi AsynxDL dengan layout dashboard modern."""
-
-    # Design tokens
-    BG = ("#F4F5F7", "#0F0F13")
-    SIDEBAR_BG = ("#FFFFFF", "#141419")
-    CARD_BG = ("#FFFFFF", "#18181E")
-    TEXT_PRIMARY = ("#111827", "#F9FAFB")
-    TEXT_SECONDARY = ("#6B7280", "#9CA3AF")
-    ACCENT = "#6366F1"
-    ACCENT_HOVER = "#4F46E5"
 
     def __init__(self, master, api: APIClient, **kwargs):
-        super().__init__(master, fg_color=self.BG, **kwargs)
-        self._api = api
-        self._cards: dict[str, DownloadCard] = {}
-        self._filter = "all"
-        self._search = ""
-        self._settings = {}
+        # Determine mode from app config, fall back to "light" for Brutalist W98.
+        try:
+            from backend.system.config import load_config
+            cfg = load_config()
+            mode = cfg.get("theme", "light")
+            if mode not in ("light", "dark"):
+                mode = "light"
+        except Exception:
+            mode = "light"
 
-        self.grid_columnconfigure(1, weight=1)
+        super().__init__(master, fg_color=theme.tokens(mode)["BG"], corner_radius=theme.CORNER_NONE, **kwargs)
+        self._api = api
+        self._mode = mode
+        self._settings: dict = {}
+        self._make_calls: list = []
+
+        tk = theme.tokens(mode)
+        self.configure(fg_color=tk["BG"])
+        self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # Sidebar
-        self._sidebar = self._build_sidebar()
-        self._sidebar.grid(row=0, column=0, sticky="nsew", padx=(0, 0), pady=0)
+        # Root host
+        self._host = ctk.CTkFrame(self, fg_color=tk["BG"], corner_radius=theme.CORNER_NONE)
+        self._host.grid(row=0, column=0, sticky="nsew")
+        self._host.grid_columnconfigure(0, weight=1)
+        self._host.grid_rowconfigure(1, weight=1)
 
-        # Main content
-        self._content = ctk.CTkFrame(self, fg_color="transparent")
-        self._content.grid(row=0, column=1, sticky="nsew", padx=16, pady=16)
-        self._content.grid_columnconfigure(0, weight=1)
-        self._content.grid_rowconfigure(1, weight=1)
+        # Top branding bar: logo + AsynxDL wordmark + tab-bar (right-aligned)
+        brand_bar = ctk.CTkFrame(self._host, fg_color=tk["BG2"], corner_radius=theme.CORNER_NONE,
+                                  height=theme.NAVBAR_HEIGHT, border_width=0)
+        brand_bar.grid(row=0, column=0, sticky="ew")
+        brand_bar.grid_columnconfigure(0, weight=0)   # logo
+        brand_bar.grid_columnconfigure(1, weight=1)   # spacer
+        brand_bar.grid_columnconfigure(2, weight=0)   # tab-bar
+        brand_bar.grid_rowconfigure(0, weight=1)
+        brand_bar.grid_propagate(False)
 
-        # Toolbar
-        self._toolbar = self._build_toolbar()
-        self._toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 16))
-
-        # Scrollable list
-        self._list_frame = ctk.CTkScrollableFrame(
-            self._content, fg_color="transparent", corner_radius=0
-        )
-        self._list_frame.grid(row=1, column=0, sticky="nsew")
-        self._list_frame.grid_columnconfigure(0, weight=1)
-
-        self._empty_label = ctk.CTkLabel(
-            self._list_frame,
-            text=t("empty.no_downloads"),
-            font=("Arial", 14),
-            text_color=self.TEXT_SECONDARY,
-        )
-        self._empty_label.grid(row=0, column=0, pady=60)
-
-        self._set_filter("all")
-
-        # WebSocket progress callback
-        self._api.set_progress_callback(lambda data: self._schedule_ui(lambda d=data: self._on_progress(d)))
-        self._api.start_ws()
-
-        # Thread-safe UI update queue
-        self._ui_queue: queue.Queue = queue.Queue()
-        self._process_ui_queue()
-
-        self.after(100, self._load_data)
-        self.after(200, self._load_settings)
-        self._poll()
-        self._start_state_heartbeat()
-
-    def _build_sidebar(self) -> ctk.CTkFrame:
-        sidebar = ctk.CTkFrame(self, width=220, fg_color=self.SIDEBAR_BG, corner_radius=0)
-        sidebar.grid_rowconfigure(2, weight=1)
-        sidebar.grid_propagate(False)
-
-        # Brand
-        brand = ctk.CTkFrame(sidebar, fg_color="transparent")
-        brand.grid(row=0, column=0, sticky="ew", padx=20, pady=(24, 16))
-        brand.grid_columnconfigure(0, weight=0)
-        brand.grid_columnconfigure(1, weight=1)
-        logo_img = _load_logo_image(size=40)
-        if logo_img:
-            logo = ctk.CTkLabel(brand, image=logo_img, text="")
-            logo.image = logo_img  # keep reference
-            logo.grid(row=0, column=0, sticky="w")
+        # logo
+        logo_img = _load_logo_image(size=26)
+        if logo_img is not None:
+            self._logo_label = ctk.CTkLabel(brand_bar, image=logo_img, text="")
+            self._logo_label.image = logo_img
         else:
-            logo = ctk.CTkLabel(
-                brand, text="📥", font=("Arial", 24, "bold"), text_color=self.ACCENT
+            self._logo_label = ctk.CTkLabel(
+                brand_bar, text="[A]",
+                font=theme.font(13, bold=True),
+                text_color=tk["FG"]
             )
-            logo.grid(row=0, column=0, sticky="w")
-        title = ctk.CTkLabel(
-            brand, text=t("app.title"), font=("Arial", 18, "bold"),
-            text_color=self.TEXT_PRIMARY
-        )
-        title.grid(row=0, column=1, sticky="w", padx=(12, 0))
+        self._logo_label.grid(row=0, column=0, sticky="w", padx=(12, 6), pady=4)
 
-        version = ctk.CTkLabel(
-            sidebar, text=t("app.version"), font=("Arial", 11),
-            text_color=self.TEXT_SECONDARY
-        )
-        version.grid(row=1, column=0, sticky="w", padx=20, pady=(0, 20))
+        ctk.CTkLabel(
+            brand_bar, text="AsynxDL",
+            font=theme.font(13, bold=True),
+            text_color=tk["FG"]
+        ).grid(row=0, column=1, sticky="w", padx=(0, 12))
 
-        # Filter tabs
-        tabs = ctk.CTkFrame(sidebar, fg_color="transparent")
-        tabs.grid(row=2, column=0, sticky="nsew", padx=14, pady=8)
-        tabs.grid_columnconfigure(0, weight=1)
+        # Tab bar inline (Home | Setting) — rect buttons, square corners.
+        tabs_frame = ctk.CTkFrame(brand_bar, fg_color="transparent", corner_radius=theme.CORNER_NONE)
+        tabs_frame.grid(row=0, column=2, sticky="e", padx=(0, 8))
+        tabs_frame.grid_rowconfigure(0, weight=1)
 
-        self._tab_buttons = {}
-        tab_keys = [
-            ("all", "All"),
-            ("downloading", "Active"),
-            ("paused", "Paused"),
-            ("completed", "Done"),
-        ]
-        for i, (key, icon) in enumerate(tab_keys):
+        self._tab_buttons: dict[str, ctk.CTkButton] = {}
+        for i, (key, label) in enumerate((("home", t("app.tab.home")), ("setting", t("app.tab.setting")))):
             btn = ctk.CTkButton(
-                tabs,
-                text=f"{icon}  {t(f'filter.{key}')}",
-                anchor="w",
-                height=38,
-                corner_radius=10,
-                font=("Arial", 13),
-                fg_color="transparent",
-                text_color=self.TEXT_SECONDARY,
-                hover_color=("#E5E7EB", "#27272A"),
-                command=lambda k=key: self._set_filter(k),
+                tabs_frame, text=label,
+                height=theme.TAB_HEIGHT, width=110,
+                corner_radius=theme.CORNER_NONE,
+                font=theme.font(11, bold=True),
+                fg_color="transparent", text_color=tk["FG"],
+                hover_color=tk["SEL_DEEP"],
+                border_width=1, border_color=tk["BORDER"],
+                command=lambda k=key: self._on_tab_click(k),
             )
-            btn.grid(row=i, column=0, sticky="ew", pady=4)
+            btn.grid(row=0, column=i, sticky="e", padx=(0 if i == 0 else 4, 4 if i < 1 else 0))
             self._tab_buttons[key] = btn
 
-        # Bottom actions
-        bottom = ctk.CTkFrame(sidebar, fg_color="transparent")
-        bottom.grid(row=3, column=0, sticky="ew", padx=14, pady=(8, 20))
-        bottom.grid_columnconfigure(0, weight=1)
+        # Stacked content frame; tab raises the right child.
+        self._content = ctk.CTkFrame(self._host, fg_color=tk["BG2"], corner_radius=theme.CORNER_NONE)
+        self._content.grid(row=1, column=0, sticky="nsew")
+        self._content.grid_columnconfigure(0, weight=1)
+        self._content.grid_rowconfigure(0, weight=1)
 
-        ctk.CTkButton(
-            bottom,
-            text=f"{t('btn.settings')}",
-            anchor="w",
-            height=38,
-            corner_radius=10,
-            font=("Arial", 13),
-            fg_color="transparent",
-            text_color=self.TEXT_SECONDARY,
-            hover_color=("#E5E7EB", "#27272A"),
-            command=self._show_settings,
-        ).grid(row=0, column=0, sticky="ew", pady=4)
+        self._home_panel = HomePanel(self._content, mode=self._mode)
+        self._settings_panel = SettingsPanel(self._content, mode=self._mode)
+        for p in (self._home_panel, self._settings_panel):
+            p.grid(row=0, column=0, sticky="nsew")
 
-        return sidebar
+        self._current_tab = "home"
+        self._on_tab_click("home")
 
-    def _build_toolbar(self) -> ctk.CTkFrame:
-        toolbar = ctk.CTkFrame(self._content, fg_color="transparent")
-        toolbar.grid_columnconfigure(0, weight=1)
+        self.after(60, self._boot_panels)
+        self.after(1500, self._state_heartbeat)
 
-        # Title + subtitle
-        header = ctk.CTkFrame(toolbar, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(
-            header,
-            text=t("toolbar.my_downloads"),
-            font=("Arial", 22, "bold"),
-            text_color=self.TEXT_PRIMARY,
-        ).grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(
-            header,
-            text=t("toolbar.manage_downloads"),
-            font=("Arial", 12),
-            text_color=self.TEXT_SECONDARY,
-        ).grid(row=1, column=0, sticky="w")
+    # ------------------------------------------------------------------ helpers
 
-        # Right side controls
-        right = ctk.CTkFrame(toolbar, fg_color="transparent")
-        right.grid(row=0, column=1, sticky="e")
-
-        self._entry_search = ctk.CTkEntry(
-            right,
-            placeholder_text=t("toolbar.search_placeholder"),
-            width=220,
-            height=38,
-            corner_radius=10,
-            font=("Arial", 12),
-            border_width=1,
-        )
-        self._entry_search.grid(row=0, column=0, padx=(0, 10))
-        self._entry_search.bind("<KeyRelease>", lambda e: self._on_search())
-
-        self._btn_add = ctk.CTkButton(
-            right,
-            text=f"+  {t('btn.add')}",
-            width=130,
-            height=38,
-            corner_radius=10,
-            font=("Arial", 13, "bold"),
-            fg_color=self.ACCENT,
-            hover_color=self.ACCENT_HOVER,
-            command=self._show_add,
-        )
-        self._btn_add.grid(row=0, column=1)
-
-        return toolbar
-
-    def _set_filter(self, key: str):
-        self._filter = key
+    def _on_tab_click(self, key: str) -> None:
+        if key not in self._tab_buttons:
+            return
+        tk = theme.tokens(self._mode)
         for k, btn in self._tab_buttons.items():
             if k == key:
                 btn.configure(
-                    fg_color=self.ACCENT,
-                    text_color="white",
-                    hover_color=self.ACCENT_HOVER,
+                    fg_color=tk["SEL_BG"],
+                    text_color=tk["SEL_FG"],
+                    border_color=tk["BORDER2"],
                 )
             else:
                 btn.configure(
                     fg_color="transparent",
-                    text_color=self.TEXT_SECONDARY,
-                    hover_color=("#E5E7EB", "#27272A"),
+                    text_color=tk["FG"],
+                    border_color=tk["BORDER"],
                 )
-        self._apply_filter()
-
-    def _on_search(self):
-        self._search = self._entry_search.get().strip().lower()
-        self._apply_filter()
-
-    def _load_data(self):
-        def do_load():
+        if key == "home":
+            self._home_panel.tkraise()
             try:
-                data = self._api.list_downloads()
-                self._schedule_ui(lambda: self._render(data))
-            except Exception as exc:
-                print(f"[MainWindow] load failed: {exc}")
-        threading.Thread(target=do_load, daemon=True).start()
-
-    def _poll(self):
-        self._load_data()
-        self.after(2000, self._poll)
-
-    def _on_progress(self, data: dict):
-        task_id = data.get("id")
-        if not task_id:
-            return
-        if task_id in self._cards:
-            self.after(0, lambda d=data: self._cards[d["id"]].update_view(d))
-        else:
-            self._load_data()
-
-    def _render(self, items: list[dict]):
-        # Track IDs yang muncul di response iterasi sekarang.
-        received_ids: set[str] = set()
-        for item in items:
-            task_id = item.get("id")
-            if not task_id:
-                continue
-            received_ids.add(task_id)
-            if task_id in self._cards:
-                self._cards[task_id].update_view(item)
-            else:
-                card = DownloadCard(self._list_frame, self._api, item, on_change=self._load_data)
-                self._cards[task_id] = card
-
-        # Bug-1 fix: discard cards yang tidak ada di response (mungkin sudah
-        # dihapus di iteration sebelumnya atau dihapus sebelum poll berikutnya
-        # tiba). Tanpa ini card tetap terlihat meskipun metadata sudah hilang.
-        stale = [tid for tid in list(self._cards.keys()) if tid not in received_ids]
-        for tid in stale:
-            card = self._cards.pop(tid, None)
-            if card is not None:
-                try:
-                    card.destroy()
-                except Exception:
-                    pass
-
-        self._apply_filter()
-
-    def _apply_filter(self):
-        visible = 0
-        row = 1
-        for task_id, card in self._cards.items():
-            status = card._status.lower()
-            name = card._filename.lower()
-            show = (self._filter == "all" or self._filter == status) and (self._search in name)
-            if show:
-                card.grid(row=row, column=0, sticky="ew", pady=8)
-                row += 1
-                visible += 1
-            else:
-                card.grid_forget()
-        if visible == 0:
-            self._empty_label.grid(row=0, column=0, pady=60)
-        else:
-            self._empty_label.grid_forget()
-        self.update_idletasks()
-
-    def _show_add(self):
-        path = self._settings.get("default_download_path", "")
-        win = AddDownloadWindow(self, self._api, on_added=self._load_data, default_path=path)
-        win.grab_set()
-
-    def _show_settings(self):
-        win = SettingsWindow(self, self._api, on_save=self._load_settings)
-        win.grab_set()
-
-    def _load_settings(self):
-        def do_load():
+                self._home_panel.on_show()
+            except Exception:
+                pass
+        elif key == "setting":
+            self._settings_panel.tkraise()
             try:
-                self._settings = self._api.get_settings()
-            except Exception as exc:
-                print(f"[MainWindow] settings load failed: {exc}")
-        threading.Thread(target=do_load, daemon=True).start()
+                self._settings_panel.on_show()
+            except Exception:
+                pass
+        self._current_tab = key
 
-    def _schedule_ui(self, callback):
-        self._ui_queue.put(callback)
-
-    def _process_ui_queue(self):
+    def _boot_panels(self) -> None:
         try:
-            while True:
-                callback = self._ui_queue.get_nowait()
-                try:
-                    callback()
-                except Exception as exc:
-                    print(f"[MainWindow] UI callback error: {exc}")
-        except queue.Empty:
-            pass
-        self.after(100, self._process_ui_queue)
+            self._home_panel.attach(self._api, {})
+        except Exception as exc:
+            print(f"[MainWindow] home attach failed: {exc}")
+        try:
+            self._settings_panel.attach(self._api, self._on_settings_saved)
+        except Exception as exc:
+            print(f"[MainWindow] settings attach failed: {exc}")
 
-    def _start_state_heartbeat(self):
-        def _beat():
+    def _on_settings_saved(self) -> None:
+        try:
+            self._settings = self._api.get_settings()
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------ public
+
+    def refresh(self) -> None:
+        try:
+            self._home_panel._load_data()
+        except Exception:
+            pass
+
+    def open_settings(self) -> None:
+        try:
+            self._on_tab_click("setting")
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------ heartbeat
+
+    def _state_heartbeat(self) -> None:
+        def _beat() -> None:
             try:
                 log_dir = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "AsynxDL", "logs")
                 os.makedirs(log_dir, exist_ok=True)
@@ -357,10 +212,13 @@ class MainWindow(ctk.CTkFrame):
                 mapped = root.winfo_ismapped()
                 with open(state_path, "a", encoding="utf-8") as f:
                     f.write(f"{datetime.datetime.now().isoformat()} state={state} geometry={geom} mapped={mapped}\n")
-            except Exception as exc:
-                print(f"[MainWindow] state heartbeat failed: {exc}")
-            self.after(1000, _beat)
-        self.after(1000, _beat)
-
-    def refresh(self):
-        self._load_data()
+            except Exception:
+                pass
+            try:
+                self.after(1500, _beat)
+            except Exception:
+                return
+        try:
+            _beat()
+        except Exception:
+            pass

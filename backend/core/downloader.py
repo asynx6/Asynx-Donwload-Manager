@@ -209,15 +209,17 @@ class DownloadTask:
                 self._broadcast_progress()
                 return
 
-            # 4. Hitung thread count
+            # 4. Hitung chunk count secara dinamis berdasarkan ukuran file
+            #    (lihat chunk_calculator.auto_chunks_for_size). Default static
+            #    ``max_threads_per_download`` jadi upper-cap.
             if not supports_range:
                 thread_count = 1
             else:
-                # Skala: 1 thread per 50 MB, minimal 1, maksimal max_threads
-                thread_count = max(1, min(
-                    self._max_threads,
-                    self._total_size // (50 * 1024 * 1024)
-                ))
+                from .chunk_calculator import auto_chunks_for_size
+                thread_count = auto_chunks_for_size(
+                    self._total_size,
+                    cap=self._max_threads,
+                )
 
             parts_dir = _get_parts_dir(self._task_id)
 

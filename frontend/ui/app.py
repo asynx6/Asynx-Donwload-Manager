@@ -1,14 +1,24 @@
+"""AsynxDL — application entrypoint/root + tray.
+
+Brutalist W98: kompak, square, kein sidebar. Logo berasal dari
+C:\\Users\\asynx\\Downloads\\AsynxDL\\Logo.png atau fallback ke icon lokal.
+"""
+
 import os
-import sys
 import threading
 import tkinter as tk
+
 import customtkinter as ctk
 
+from frontend.ui import theme
 from frontend.ui.api_client import APIClient
 from frontend.ui.i18n import set_language, t
 from frontend.ui.windows.main_window import MainWindow
 from backend.system.config import load_config
 from backend.system.tray import TrayIcon
+
+
+_LOCAL_LOGO_CANDIDATE = r"C:\Users\asynx\Downloads\AsynxDL\Logo.png"
 
 
 class AsynxDLApp:
@@ -20,25 +30,21 @@ class AsynxDLApp:
         else:
             self._root = root
         self._root.title(t("app.title"))
-        self._root.geometry("1000x680")
-        self._root.minsize(860, 560)
 
         config = load_config()
         lang = config.get("language", "en")
-        theme = config.get("theme", "dark")
+        theme_mode = config.get("theme", "light")
+        if theme_mode not in ("light", "dark"):
+            theme_mode = "light"
+        self._theme_mode = theme_mode
         set_language(lang)
-        ctk.set_appearance_mode(theme)
-        ctk.set_default_color_theme("dark-blue")
+        ctk.set_appearance_mode(theme_mode)
+        ctk.set_default_color_theme("dark-blue")  # tidak dipakai (kita pakai token sendiri)
 
-        # Center window on screen — non-blocking calc untuk hindari round-trip
-        # ke display; kalau screen size belum siap fallback ke default.
-        sw = self._root.winfo_screenwidth() or 1920
-        sh = self._root.winfo_screenheight() or 1080
-        x = max(0, (sw - 1000) // 2)
-        y = max(0, (sh - 680) // 2)
-        self._root.geometry(f"1000x680+{x}+{y}")
+        # Center window
+        theme.apply_window_geometry(self._root, width=1080, height=720)
 
-        # Use Arial as the default safe Windows font
+        # Use Arial as default safe Windows font
         try:
             self._root.option_add("*Font", "Arial")
         except tk.TclError:
@@ -51,8 +57,7 @@ class AsynxDLApp:
         self._tray_icon: TrayIcon | None = None
         self._setup_window_behavior()
 
-        # Bug-2 fix: defer icon load supaya first-paint tidak blocking
-        # pada image decode + wm_iconphoto call (200-400 ms biasanya).
+        # Defer icon load
         if not minimized:
             try:
                 self._root.after(30, self._load_icon)
@@ -64,52 +69,54 @@ class AsynxDLApp:
         if minimized:
             self._root.withdraw()
 
-    def _load_icon(self):
+    # ------------------------------------------------------------------ icon
+
+    def _load_icon(self) -> None:
         try:
             from PIL import Image, ImageTk
-            # Prefer the new Logo-based PNG if available
-            for logo_name in ("logo.png", "tray.png"):
-                logo_path = os.path.join(os.path.dirname(__file__), "assets", "icons", logo_name)
-                if os.path.exists(logo_path):
-                    img = Image.open(logo_path)
+            for path in (
+                _LOCAL_LOGO_CANDIDATE,
+                os.path.join(os.path.dirname(__file__), "assets", "icons", "logo.png"),
+                os.path.join(os.path.dirname(__file__), "assets", "icons", "logo.jpg"),
+                os.path.join(os.path.dirname(__file__), "assets", "icons", "tray.png"),
+            ):
+                if path and os.path.exists(path):
+                    img = Image.open(path)
                     img_tk = ImageTk.PhotoImage(img)
                     self._root.wm_iconphoto(True, img_tk)
                     return
-            # Fallback to the packaged .ico
             icon_path = os.path.join(os.path.dirname(__file__), "assets", "icons", "app.ico")
             if os.path.exists(icon_path):
                 self._root.iconbitmap(icon_path)
         except Exception:
             pass
 
-    def _setup_window_behavior(self):
+    # ------------------------------------------------------------------ tray
+
+    def _setup_window_behavior(self) -> None:
         self._root.protocol("WM_DELETE_WINDOW", self._hide_to_tray)
 
-    def _hide_to_tray(self):
-        # Balloon notify kalau ada download sedang berjalan.
+    def _hide_to_tray(self) -> None:
         active = self._count_active_downloads()
         if active > 0:
             self._notify_tray(
                 title="AsynxDL — download masih berjalan",
-                message=f"{active} download aktif di background. "
-                        f"Klik tray icon untuk membuka lagi.",
+                message=f"{active} download aktif di background. Klik tray icon untuk membuka lagi.",
             )
         self._root.withdraw()
         if not self._tray_icon:
             self._tray_icon = TrayIcon(self)
             self._tray_icon.set_state_provider(self._tray_state)
             threading.Thread(target=self._tray_icon.run, daemon=True).start()
-        # Update icon saat pertama hide
         try:
             self._tray_icon.update_state()
         except Exception:
             pass
 
     def _count_active_downloads(self) -> int:
-        """Hitung download yang DOWNLOADING/PENDING di MainWindow."""
         try:
             n = 0
-            for card in getattr(self._main, "_cards", {}).values():
+            for card in getattr(self._main, "_home_panel")._cards.values():
                 if getattr(card, "_status", "") in ("DOWNLOADING", "PENDING"):
                     n += 1
             return n
@@ -118,15 +125,10 @@ class AsynxDLApp:
 
     def _tray_state(self) -> str:
         n = self._count_active_downloads()
-        if n == 0:
-            return "idle"
-        # Future: kalau ada task ERRORED, return "blocked". Untuk
-        # sekarang aktif = aktif ≥1.
-        return "active"
+        return "idle" if n == 0 else "active"
 
     def _notify_tray(self, title: str, message: str) -> None:
-        """Kirim balloon ke tray icon — di thread-safe (after(0,...))."""
-        def _do():
+        def _do() -> None:
             try:
                 if self._tray_icon is not None:
                     self._tray_icon.notify(title, message)
@@ -137,39 +139,39 @@ class AsynxDLApp:
         except Exception:
             pass
 
-    def show_window(self):
+    def show_window(self) -> None:
         self._root.deiconify()
         self._root.lift()
         self._root.focus_force()
         self._root.attributes("-topmost", True)
         self._root.after(300, lambda: self._root.attributes("-topmost", False))
 
-    def hide_window(self):
+    def hide_window(self) -> None:
         self._root.withdraw()
 
-    def open_settings(self):
+    def open_settings(self) -> None:
         self.show_window()
         try:
-            self._main._show_settings()
+            self._main.open_settings()
         except Exception:
             pass
 
-    def pause_all(self):
-        for card in getattr(self._main, "_cards", {}).values():
-            if card._status in ("DOWNLOADING", "PENDING"):
-                threading.Thread(target=self._api.pause, args=(card._task_id,), daemon=True).start()
+    def pause_all(self) -> None:
+        try:
+            for card in getattr(self._main, "_home_panel")._cards.values():
+                if card._status in ("DOWNLOADING", "PENDING"):
+                    threading.Thread(target=self._api.pause, args=(card._task_id,), daemon=True).start()
+        except Exception:
+            pass
 
-    def shutdown_clean(self):
-        """Pause semua download dulu supaya chunk tidak orphan saat
-        proses exit. Dipakai dari menu tray Quit."""
+    def shutdown_clean(self) -> None:
         try:
             self.pause_all()
-            # Tiny grace supaya pause thread sempat jalan.
             threading.Event().wait(timeout=0.5)
         except Exception:
             pass
 
-    def exit_app(self):
+    def exit_app(self) -> None:
         try:
             if self._tray_icon is not None:
                 self._tray_icon.stop()
@@ -180,9 +182,8 @@ class AsynxDLApp:
         except Exception:
             pass
 
-    def run(self):
-        # Heartbeat supaya tray icon berubah status sesuai active count.
-        def _heartbeat():
+    def run(self) -> None:
+        def _heartbeat() -> None:
             try:
                 if self._tray_icon is not None:
                     self._tray_icon.update_state()
@@ -199,7 +200,7 @@ class AsynxDLApp:
         self._root.mainloop()
 
 
-def run_app(minimized=False):
+def run_app(minimized: bool = False) -> None:
     app = AsynxDLApp(minimized=minimized)
     app.run()
 
