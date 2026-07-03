@@ -242,17 +242,21 @@ class DownloadCard(ctk.CTkFrame):
 
     def _toggle_action(self) -> None:
         if self._status in ("DOWNLOADING", "PENDING"):
+            # Audit-fix H5: jangan diam-diam lewati dialog kalau error.
+            # Log dan return — pause TIDAK boleh fire tanpa konfirmasi user.
             try:
-                if not ask_yes_no(
+                confirmed = ask_yes_no(
                     self.winfo_toplevel(),
                     title=t("dlg.pause.title", default="Pause Download?"),
                     message=t("dlg.pause.body",
                               default=f"Pause \"{self._filename}\"?\nProgress akan disimpan."),
                     danger=False,
-                ):
-                    return
-            except Exception:
-                pass
+                )
+            except Exception as exc:
+                print(f"[DownloadCard] pause-confirm error: {exc}")
+                return
+            if not confirmed:
+                return
             threading.Thread(target=self._api.pause, args=(self._task_id,), daemon=True).start()
         elif self._status in ("PAUSED", "ERROR"):
             threading.Thread(target=self._api.resume, args=(self._task_id,), daemon=True).start()
@@ -268,18 +272,21 @@ class DownloadCard(ctk.CTkFrame):
             self._api.run_file(path)
 
     def _delete(self) -> None:
+        # Audit-fix H5: jangan diam-diam lewat kalau dialog error.
         try:
-            if not ask_yes_no(
+            confirmed = ask_yes_no(
                 self.winfo_toplevel(),
                 title=t("dlg.delete.title", default="Hapus Download?"),
                 message=t("dlg.delete.body",
                           default=f"Hapus permanen \"{self._filename}\" dan riwayatnya?\n\nTidak bisa dibatalkan."),
                 yes_label=t("btn.delete", default="Hapus"),
                 danger=True,
-            ):
-                return
-        except Exception:
-            pass
+            )
+        except Exception as exc:
+            print(f"[DownloadCard] delete-confirm error: {exc}")
+            return
+        if not confirmed:
+            return
 
         task_id = self._task_id
         def _vanish() -> None:

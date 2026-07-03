@@ -167,7 +167,9 @@ class AsynxDLApp:
     def shutdown_clean(self) -> None:
         try:
             self.pause_all()
-            threading.Event().wait(timeout=0.5)
+            # 5.0s grace: allow chunk threads (up to 8 per download) to flush
+            # their in-flight writes to .part files before app exits.
+            threading.Event().wait(timeout=5.0)
         except Exception:
             pass
 
