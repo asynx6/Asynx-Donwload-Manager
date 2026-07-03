@@ -22,35 +22,11 @@ from .file_validator import (
 from .merger import merge_parts
 from .metadata_manager import MetadataManager
 from .speed_limiter import SpeedLimiter
+from .parts_dir import get_parts_dir as _get_parts_dir
 
 
-# AsynxDL application cache directory under %LOCALAPPDATA%
-_APP_LOCAL_DIR = os.path.join(
-    os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "AsynxDL"
-)
-
-
-def _ensure_app_local_dir() -> str:
-    os.makedirs(_APP_LOCAL_DIR, exist_ok=True)
-    return _APP_LOCAL_DIR
-
-
-def _get_parts_dir(task_id: str) -> str:
-    r"""Return the hidden parts directory for this task.
-
-    Parts are stored in %LOCALAPPDATA%\AsynxDL\.parts so they do not clutter the
-    user's download folder. The directory is marked hidden on Windows.
-    """
-    _ensure_app_local_dir()
-    parts_dir = os.path.join(_APP_LOCAL_DIR, ".parts")
-    os.makedirs(parts_dir, exist_ok=True)
-    # Mark the directory hidden on Windows
-    try:
-        import ctypes
-        ctypes.windll.kernel32.SetFileAttributesW(parts_dir, 0x02)
-    except Exception:
-        pass
-    return parts_dir
+# AsynxDL application cache directory under %LOCALAPPDATA%:
+# delegated to backend.core.parts_dir (M6: single source of truth).
 
 
 class DownloadTask:
@@ -221,7 +197,7 @@ class DownloadTask:
                     cap=self._max_threads,
                 )
 
-            parts_dir = _get_parts_dir(self._task_id)
+            parts_dir = _get_parts_dir()
 
             # 5. Buat metadata
             metadata = self._meta_mgr.create(
@@ -344,7 +320,6 @@ class DownloadTask:
         ``.part*`` dan ``.final`` yang dibersihkan.
         """
         self._stop_event.set()
-        old_status = self._status
         self._status = "CANCELLED"
 
         if self._task_id:
@@ -363,8 +338,9 @@ class DownloadTask:
             except Exception:
                 pass
 
-        if old_status == "DOWNLOADING":
-            self._broadcast_progress()
+        # Audit-fix M1: broadcast unconditionally supaya WebSocket UI
+        # menerima status=CANCELLED terlepas dari old_status.
+        self._broadcast_progress()
 
     # ── Internal Methods ────────────────────────────────────────
 
@@ -380,7 +356,7 @@ class DownloadTask:
             self._status = "ERROR"
             return
 
-        parts_dir = metadata.get("parts_dir", _get_parts_dir(self._task_id))
+        parts_dir = metadata.get("parts_dir", _get_parts_dir())
         final_path = metadata["save_path"]
 
         with ThreadPoolExecutor(max_workers=thread_count) as executor:
@@ -503,7 +479,7 @@ class DownloadTask:
             return
 
         chunks = metadata.get("chunks", [])
-        parts_dir = metadata.get("parts_dir", _get_parts_dir(self._task_id))
+        parts_dir = metadata.get("parts_dir", _get_parts_dir())
         final_path = metadata["save_path"]
         temp_output = os.path.join(parts_dir, f"{self._task_id}.final")
         part_files = [
