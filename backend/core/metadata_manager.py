@@ -46,19 +46,100 @@ class MetadataManager:
             queue_dir: Path relatif/absolut ke folder metadata (data/queue/).
         """
         self._queue_dir = Path(os.path.expandvars(os.path.expanduser(queue_dir)))
+        self._completed_dir = self._queue_dir / "completed"
         os.makedirs(self._queue_dir, exist_ok=True)
+        os.makedirs(self._completed_dir, exist_ok=True)
 
     def _metadata_path(self, task_id: str) -> Path:
-        """Path file metadata untuk task_id tertentu."""
+        """Path file metadata untuk task_id tertentu (folder active)."""
         if not task_id or not _is_safe_task_id(task_id):
             raise ValueError("Invalid task_id")
         return self._queue_dir / f"{task_id}.json"
+
+    def _completed_path(self, task_id: str) -> Path:
+        """Path file metadata untuk task_id tertentu di folder completed/."""
+        if not task_id or not _is_safe_task_id(task_id):
+            raise ValueError("Invalid task_id")
+        return self._completed_dir / f"{task_id}.json"
+
+    def mark_completed(self, task_id: str, **extra) -> dict | None:
+        """Pindahkan metadata ke ``data/queue/completed/`` (persist history).
+
+        Task dihapus dari folder active agar tidak muncul lagi di ``list_all``
+        aktif. Task tetap direcover saat boot lewat ``list_history``.
+
+        Returns dict yang dipindahkan, atau None jika tidak ditemukan.
+        """
+        src = self._metadata_path(task_id)
+        dst = self._completed_path(task_id)
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with self._lock:
+            try:
+                with open(src, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError):
+                return None
+            data["status"] = "COMPLETED"
+            data["completed_at"] = now
+            data["updated_at"] = now
+            data.update(extra)
+            try:
+                # atomic move: write to dst then remove src
+                tmp = dst.with_suffix(".tmp")
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, dst)
+                try:
+                    os.remove(src)
+                except FileNotFoundError:
+                    pass
+            except OSError as exc:
+                # Fallback: keep at src so state isn't lost
+                self.update(task_id, status="COMPLETED", completed_at=now, **extra)
+                return self.load(task_id)
+        return data
+
+    def remove_from_history(self, task_id: str) -> bool:
+        """Hapus permanen dari folder completed/. Return True jika ada yang dihapus."""
+        path = self._completed_path(task_id)
+        with self._lock:
+            try:
+                os.remove(path)
+                return True
+            except FileNotFoundError:
+                return False
+
+    def list_history(self) -> list[dict]:
+        """List semua task di folder completed/, urut updated_at desc."""
+        results = []
+        for path in self._completed_dir.glob("*.json"):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                results.append(data)
+            except (json.JSONDecodeError, OSError):
+                continue
+        results.sort(key=lambda d: d.get("updated_at", ""), reverse=True)
+        return results
+
+    def list_all_with_history(self, status_filter: list[str] | None = None) -> list[dict]:
+        """Gabungkan list_all (active) + list_history (completed) jadi satu output."""
+        active = self.list_all(status_filter=status_filter)
+        history = self.list_history()
+        # History items yang berstatus selain yang ada di status_filter tetap tampilkan
+        if status_filter is None:
+            return active + history
+        history_filtered = [h for h in history if h.get("status") in status_filter]
+        return active + history_filtered
 
     def create(self, url: str, filename: str, save_path: str,
                total_size: int, thread_count: int,
                speed_limit_kbps: int = 0,
                graceful_exit: bool = False,
-               task_id: str | None = None) -> dict:
+               task_id: str | None = None,
+               parts_dir: str | None = None) -> dict:
         """Buat metadata baru untuk download task.
 
         Args:
@@ -70,6 +151,7 @@ class MetadataManager:
             speed_limit_kbps: Batas kecepatan (0 = unlimited).
             graceful_exit: Flag exit (default False saat dibuat).
             task_id: Optional task ID (dibuat baru jika tidak diberikan).
+            parts_dir: Optional directory for temporary .part files.
 
         Returns:
             Dict metadata lengkap yang sudah disimpan.
@@ -109,6 +191,8 @@ class MetadataManager:
             "created_at": now,
             "updated_at": now
         }
+        if parts_dir:
+            metadata["parts_dir"] = parts_dir
 
         with self._lock:
             with open(self._metadata_path(task_id), "w", encoding="utf-8") as f:

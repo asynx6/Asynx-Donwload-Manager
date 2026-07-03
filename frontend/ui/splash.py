@@ -7,6 +7,8 @@ bisa digunakan oleh UI utama, menghindari dua instance Tk.
 """
 
 import customtkinter as ctk
+import os
+from PIL import Image
 
 
 class SplashWindow:
@@ -20,7 +22,7 @@ class SplashWindow:
         self._root.resizable(False, False)
 
         # Ukuran splash
-        width, height = 420, 220
+        width, height = 420, 260
         screen_w = self._root.winfo_screenwidth()
         screen_h = self._root.winfo_screenheight()
         x = (screen_w - width) // 2
@@ -32,13 +34,24 @@ class SplashWindow:
 
         self._root.configure(fg_color="#1E1E2E")
 
+        # Logo image
+        self._logo_label = None
+        try:
+            logo_path = os.path.join(os.path.dirname(__file__), "assets", "icons", "logo.png")
+            if os.path.exists(logo_path):
+                logo_img = ctk.CTkImage(Image.open(logo_path), size=(64, 64))
+                self._logo_label = ctk.CTkLabel(self._root, image=logo_img, text="")
+                self._logo_label.pack(pady=(20, 6))
+        except Exception:
+            pass
+
         ctk.CTkLabel(
             self._root,
             text=title,
             font=("Arial", 24, "bold"),
             fg_color="#1E1E2E",
             text_color="#7B8BFF",
-        ).pack(pady=(30, 10))
+        ).pack(pady=(10, 10))
 
         self._status = ctk.CTkLabel(
             self._root,
@@ -55,7 +68,7 @@ class SplashWindow:
 
         ctk.CTkLabel(
             self._root,
-            text="v1.0.0",
+            text="v1.0.1",
             font=("Arial", 9),
             fg_color="#1E1E2E",
             text_color="#888888",

@@ -1,19 +1,8 @@
-"""
-AsynxDL — Downloader Orchestrator Module
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Class DownloadTask: mengelola siklus hidup satu download dari start
-hingga complete. Menggunakan ThreadPoolExecutor untuk multi-thread
-chunked download.
-
-Kelas:
-    - DownloadTask: orchestrator utama per download.
-"""
-
 import os
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 
 from .chunk_manager import (
     download_chunk,
@@ -28,10 +17,40 @@ from .file_validator import (
     normalize_path,
     sanitize_filename,
     resolve_duplicate_name,
+    resolve_filename,
 )
 from .merger import merge_parts
 from .metadata_manager import MetadataManager
 from .speed_limiter import SpeedLimiter
+
+
+# AsynxDL application cache directory under %LOCALAPPDATA%
+_APP_LOCAL_DIR = os.path.join(
+    os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "AsynxDL"
+)
+
+
+def _ensure_app_local_dir() -> str:
+    os.makedirs(_APP_LOCAL_DIR, exist_ok=True)
+    return _APP_LOCAL_DIR
+
+
+def _get_parts_dir(task_id: str) -> str:
+    r"""Return the hidden parts directory for this task.
+
+    Parts are stored in %LOCALAPPDATA%\AsynxDL\.parts so they do not clutter the
+    user's download folder. The directory is marked hidden on Windows.
+    """
+    _ensure_app_local_dir()
+    parts_dir = os.path.join(_APP_LOCAL_DIR, ".parts")
+    os.makedirs(parts_dir, exist_ok=True)
+    # Mark the directory hidden on Windows
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetFileAttributesW(parts_dir, 0x02)
+    except Exception:
+        pass
+    return parts_dir
 
 
 class DownloadTask:
@@ -165,8 +184,12 @@ class DownloadTask:
                 self._broadcast_progress()
                 return
 
-            # 2. Resolve filename dan path
-            filename = self._requested_filename or url_filename
+            # 2. Resolve filename dan path — pakai resolve_filename() deterministik
+            # supaya URL dengan %20 / karakter encoded tampil benar sejak detik
+            # pertama di UI (bukan "A" atau "unnamed_file").
+            filename = resolve_filename(
+                self._requested_filename, url_filename, self.url
+            )
             filename = sanitize_filename(filename)
             save_folder = self._requested_save_path
             os.makedirs(save_folder, exist_ok=True)
@@ -196,6 +219,8 @@ class DownloadTask:
                     self._total_size // (50 * 1024 * 1024)
                 ))
 
+            parts_dir = _get_parts_dir(self._task_id)
+
             # 5. Buat metadata
             metadata = self._meta_mgr.create(
                 url=self.url,
@@ -206,6 +231,7 @@ class DownloadTask:
                 speed_limit_kbps=self._limiter.limit_kbps,
                 graceful_exit=False,
                 task_id=self._task_id,
+                parts_dir=parts_dir,
             )
 
             self._broadcast_progress()
@@ -307,29 +333,33 @@ class DownloadTask:
                 self._session = None
 
     def cancel(self):
-        """Batalkan download dan bersihkan semua file terkait.
+        """Batalkan download dan bersihkan file chunk terkait.
 
-        - Stop semua thread.
-        - Hapus semua file .part.
-        - Hapus file metadata .json.
+        Status ``CANCELLED`` tetap disimpan ke metadata (folder active)
+        supaya history ``data/queue/completed/`` atau active ``list_all``
+        masih bisa menampilkannya dan user melihat jejak aksi di UI.
+        Metadata active folder JANGAN dihapus di sini—hanya chunk file
+        ``.part*`` dan ``.final`` yang dibersihkan.
         """
         self._stop_event.set()
         old_status = self._status
         self._status = "CANCELLED"
-        self._shutdown_executor()
 
         if self._task_id:
-            # Hapus file .part
             metadata = self._meta_mgr.load(self._task_id)
             if metadata:
-                save_path = metadata.get("save_path", "")
-                for chunk in metadata.get("chunks", []):
-                    part_path = f"{save_path}.part{chunk['index']}"
-                    try:
-                        os.remove(part_path)
-                    except FileNotFoundError:
-                        pass
-            self._meta_mgr.delete(self._task_id)
+                self._meta_mgr.update(
+                    self._task_id,
+                    status="CANCELLED",
+                    graceful_exit=True,
+                )
+            # Hapus .part dan .final dari parts directory.
+            # Imports lokal agar tidak ada lingkaran import.
+            try:
+                from backend.core.parts_dir import purge_all_parts_for
+                purge_all_parts_for(self._task_id)
+            except Exception:
+                pass
 
         if old_status == "DOWNLOADING":
             self._broadcast_progress()
@@ -348,6 +378,7 @@ class DownloadTask:
             self._status = "ERROR"
             return
 
+        parts_dir = metadata.get("parts_dir", _get_parts_dir(self._task_id))
         final_path = metadata["save_path"]
 
         with ThreadPoolExecutor(max_workers=thread_count) as executor:
@@ -362,7 +393,7 @@ class DownloadTask:
                     # Chunk sudah selesai
                     continue
 
-                part_path = f"{final_path}.part{idx}"
+                part_path = os.path.join(parts_dir, f"{self._task_id}.part{idx}")
                 future = executor.submit(
                     download_chunk,
                     url=self.url,
@@ -380,19 +411,29 @@ class DownloadTask:
             self._last_downloaded = self._downloaded_size
             self._last_meta_flush = 0.0
 
-            # Monitor futures sampai semua selesai
+            # Monitor futures sampai semua selesai. as_completed timeout yang
+            # pendek digunakan untuk memberi kesempatan progress update; kita
+            # abaikan TimeoutError karena download mungkin masih berjalan.
             pending = {f for f, _ in self._futures}
             while pending and not self._stop_event.is_set():
-                # as_completed() yields futures as they complete
-                for done_future in as_completed(pending, timeout=0.5):
-                    pending.discard(done_future)
-                    break  # Hanya proses satu, lalu update progress
+                done = set()
+                try:
+                    for done_future in as_completed(pending, timeout=1.0):
+                        done.add(done_future)
+                        break  # process one completed future per iteration
+                except Exception as exc:
+                    # TimeoutError / concurrent.futures.TimeoutError: tidak ada
+                    # chunk yang selesai dalam 1 detik terakhir. Lanjutkan loop.
+                    if "futures unfinished" not in str(exc) and not isinstance(exc, TimeoutError):
+                        print(f"[DownloadTask] as_completed error: {exc}")
+
+                pending -= done
 
                 if self._stop_event.is_set():
                     break
 
                 # Hitung total downloaded dari file .part di disk
-                self._update_downloaded_size_from_parts(chunks, final_path)
+                self._update_downloaded_size_from_parts(chunks, parts_dir)
                 self._compute_speed()
                 self._throttled_meta_flush()
 
@@ -408,14 +449,22 @@ class DownloadTask:
             self._executor = None
             self._futures = []
 
-    def _update_downloaded_size_from_parts(self, chunks: list, final_path: str):
+    def _update_downloaded_size_from_parts(self, chunks: list, parts_dir: str):
         """Hitung total byte terdownload dari ukuran file .part di disk.
 
         Lebih akurat daripada tracking in-memory, terutama untuk resume.
+        Throttled ke 1s supaya 8 thread tidak spam os.path.getsize
+        tiap iterasi event loop (RAM 4GB + slow network = panggilan
+        tiap chunk tiap detik menjadi mahal).
         """
+        now = time.monotonic()
+        last = getattr(self, "_last_size_poll_at", 0.0)
+        if now - last < 1.0:
+            return
+        self._last_size_poll_at = now
         total = 0
         for chunk in chunks:
-            part_path = f"{final_path}.part{chunk['index']}"
+            part_path = os.path.join(parts_dir, f"{self._task_id}.part{chunk['index']}")
             try:
                 if os.path.exists(part_path):
                     total += os.path.getsize(part_path)
@@ -447,23 +496,47 @@ class DownloadTask:
             self._broadcast_progress()
 
     def _merge_and_finalize(self, metadata: dict):
-        """Gabungkan semua .part, verifikasi, dan cleanup."""
+        """Gabungkan semua .part, verifikasi, dan pindahkan ke tujuan akhir."""
         if self._stop_event.is_set():
             return
 
         chunks = metadata.get("chunks", [])
+        parts_dir = metadata.get("parts_dir", _get_parts_dir(self._task_id))
         final_path = metadata["save_path"]
-        part_files = [f"{final_path}.part{c['index']}" for c in sorted(chunks, key=lambda x: x["index"])]
+        temp_output = os.path.join(parts_dir, f"{self._task_id}.final")
+        part_files = [
+            os.path.join(parts_dir, f"{self._task_id}.part{c['index']}")
+            for c in sorted(chunks, key=lambda x: x["index"])
+        ]
+
+        # Pastikan folder tujuan akhir ada
+        final_dir = os.path.dirname(final_path)
+        if final_dir:
+            os.makedirs(final_dir, exist_ok=True)
 
         success = merge_parts(
             part_files=part_files,
-            output_path=final_path,
+            output_path=temp_output,
             expected_size=self._total_size,
         )
 
         if success:
-            self._status = "COMPLETED"
-            self._meta_mgr.delete(self._task_id)
+            try:
+                os.replace(temp_output, final_path)
+                self._status = "COMPLETED"
+                # History persistence: pindahkan metadata ke completed/ folder
+                # alih-alih menghapusnya seperti sebelumnya. Dengan begitu,
+                # tab "Done" pada UI terus menampilkan file yang selesai di
+                # download sampai user memilih "Hapus dari Riwayat".
+                try:
+                    self._meta_mgr.mark_completed(self._task_id)
+                except Exception as exc:
+                    print(f"[DownloadTask] mark_completed failed: {exc}")
+            except OSError as exc:
+                self._status = "ERROR"
+                print(f"[ERROR] DownloadTask: failed to move final file: {exc}")
+                if self._task_id:
+                    self._meta_mgr.update(self._task_id, status="ERROR")
         else:
             self._status = "ERROR"
             if self._task_id:

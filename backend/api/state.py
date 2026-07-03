@@ -9,10 +9,17 @@ import os
 import threading
 import time
 from typing import Callable, Optional
+from urllib.parse import urlparse, unquote
 
 from backend.core.downloader import DownloadTask
 from backend.core.metadata_manager import MetadataManager
+from backend.core.file_validator import resolve_filename
 from backend.system.config import load_config
+
+
+def _guess_filename_from_url(url: str) -> str:
+    """Legacy: kept for backwards compatibility; prefer resolve_filename()."""
+    return resolve_filename("", "", url)
 
 
 class DownloadManager:
@@ -81,10 +88,12 @@ class DownloadManager:
         )
 
         # Buat metadata PENDING terlebih dahulu agar task_id tersedia
+        # Gunakan resolve_filename() deterministik untuk fix bug 'A' di UI.
+        display_filename = resolve_filename(filename, "", url)
         task._meta_mgr.create(
             url=url,
-            filename=filename,
-            save_path=os.path.join(save_path, filename) if filename else "",
+            filename=display_filename,
+            save_path=os.path.join(save_path, display_filename) if display_filename else "",
             total_size=0,
             thread_count=max_threads,
             speed_limit_kbps=limit,
@@ -201,6 +210,13 @@ class DownloadManager:
         if task:
             task.pause()
             return self._task_info(task)
+        # 404 fix: kalau sudah COMPLETED, kembalikan info saja tanpa error
+        meta = self._meta_mgr.load(task_id)
+        if meta and meta.get("status") in ("COMPLETED", "ERROR", "CANCELLED"):
+            return self._meta_to_info(meta)
+        completed_meta = self._completed_load(task_id)
+        if completed_meta:
+            return completed_meta
         return {"error": "Task not found"}
 
     def resume(self, task_id: str) -> dict:
@@ -235,27 +251,95 @@ class DownloadManager:
                 self._active[task_id] = task
             threading.Thread(target=task.resume, daemon=True).start()
             return self._task_info(task)
+        completed_meta = self._completed_load(task_id)
+        if completed_meta:
+            # Sudah selesai, tidak ada state yang bisa di-resume.
+            return completed_meta
         return {"error": "Task not found"}
 
-    def delete(self, task_id: str, delete_parts: bool = True) -> dict:
+    def _completed_load(self, task_id: str) -> Optional[dict]:
+        """Loader tambahan untuk history folder completed/ (kalau aktif
+        tapi sudah pernah di-mark_complete sebelum di-restart)."""
+        try:
+            history = self._meta_mgr.list_history()
+        except Exception:
+            return None
+        for meta in history:
+            if meta.get("id") == task_id:
+                return self._meta_to_info(meta)
+        return None
+
+    def delete(self, task_id: str, delete_parts: bool = True,
+               remove_from_history: bool = False) -> dict:
         with self._lock:
             task = self._active.pop(task_id, None)
         if task:
             task.cancel()
+            # Tetap hapus metadata jika ada di history completed/
+            if remove_from_history:
+                self._meta_mgr.remove_from_history(task_id)
             return {"ok": True}
         meta = self._meta_mgr.load(task_id)
+        if not meta:
+            # 404 fix: kalau tidak ada di folder active tapi ada di history,
+            # user mungkin meminta remove_from_history - arahkan ke sana.
+            if remove_from_history:
+                return self.remove_history(task_id, delete_parts=delete_parts)
+            return {"error": "Task not found"}
+        # Hapus metadata dari active folder
+        self._meta_mgr.delete(task_id)
+        # Bersihkan semua .part dan .final di parts_dir
+        try:
+            from backend.core.parts_dir import purge_all_parts_for, purge_all_orphans
+            purge_all_parts_for(task_id)
+            purge_all_orphans()
+        except Exception:
+            pass
+        if delete_parts and meta.get("chunks"):
+            parts_dir = meta.get("parts_dir", os.path.dirname(meta.get("save_path", "")))
+            for chunk in meta.get("chunks", []):
+                part = os.path.join(parts_dir, f"{task_id}.part{chunk['index']}")
+                try:
+                    os.remove(part)
+                except FileNotFoundError:
+                    pass
+            try:
+                final_temp = os.path.join(parts_dir, f"{task_id}.final")
+                if os.path.exists(final_temp):
+                    os.remove(final_temp)
+            except FileNotFoundError:
+                pass
+        # 404 fix: kalau remove_from_history=True, hapus juga dari completed/
+        if remove_from_history:
+            self._meta_mgr.remove_from_history(task_id)
+        return {"ok": True}
+
+    def remove_history(self, task_id: str, delete_parts: bool = True) -> dict:
+        """Hapus permanen task dari history completed/ + bersihkan parts."""
+        parts_dir = None
+        meta = self._meta_mgr.load(task_id)
         if meta:
-            self._meta_mgr.delete(task_id)
-            if delete_parts:
-                save_path = meta.get("save_path", "")
-                for chunk in meta.get("chunks", []):
-                    part = f"{save_path}.part{chunk['index']}"
-                    try:
-                        os.remove(part)
-                    except FileNotFoundError:
-                        pass
-            return {"ok": True}
-        return {"error": "Task not found"}
+            parts_dir = meta.get("parts_dir")
+        if not parts_dir:
+            for h in self._meta_mgr.list_history():
+                if h.get("id") == task_id:
+                    parts_dir = h.get("parts_dir")
+                    break
+        if delete_parts and parts_dir:
+            part_glob = os.path.join(parts_dir, f"{task_id}.part*")
+            import glob
+            for part in glob.glob(part_glob):
+                try:
+                    os.remove(part)
+                except FileNotFoundError:
+                    pass
+            final_part = os.path.join(parts_dir, f"{task_id}.final")
+            try:
+                os.remove(final_part)
+            except FileNotFoundError:
+                pass
+        removed = self._meta_mgr.remove_from_history(task_id)
+        return {"ok": True, "removed": removed}
 
     def recover(self) -> list[dict]:
         """Recovery state saat boot."""

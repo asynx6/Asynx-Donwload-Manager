@@ -1,6 +1,7 @@
 import os
 import tkinter.filedialog as filedialog
 import customtkinter as ctk
+from PIL import Image
 
 from backend.system.config import load_config, update_config, mark_first_run_completed
 from frontend.ui.i18n import t, set_language
@@ -18,7 +19,7 @@ class FirstRunWizard(ctk.CTkToplevel):
     def __init__(self, master, on_finish=None, **kwargs):
         super().__init__(master, **kwargs)
         self.title(t("wizard.welcome"))
-        self.geometry("620x480")
+        self.geometry("620x540")
         self.resizable(False, False)
         self._on_finish = on_finish
         self._config = load_config()
@@ -32,21 +33,30 @@ class FirstRunWizard(ctk.CTkToplevel):
         self._header.grid(row=0, column=0, sticky="ew", padx=36, pady=(36, 8))
         self._header.grid_columnconfigure(0, weight=1)
 
+        # Logo image
+        try:
+            logo_path = os.path.join(os.path.dirname(__file__), "..", "assets", "icons", "logo.png")
+            if os.path.exists(logo_path):
+                logo_img = ctk.CTkImage(Image.open(logo_path), size=(48, 48))
+                ctk.CTkLabel(self._header, image=logo_img, text="").grid(row=0, column=0, sticky="w", pady=(0, 4))
+        except Exception:
+            pass
+
         self._title = ctk.CTkLabel(
             self._header, text=t("wizard.welcome"), font=("Arial", 22, "bold"),
             text_color=self.TEXT_PRIMARY
         )
-        self._title.grid(row=0, column=0, sticky="w")
+        self._title.grid(row=1, column=0, sticky="w")
 
         self._subtitle = ctk.CTkLabel(
             self._header, text=t("wizard.subtitle"), font=("Arial", 13),
             text_color=self.TEXT_SECONDARY
         )
-        self._subtitle.grid(row=1, column=0, sticky="w")
+        self._subtitle.grid(row=2, column=0, sticky="w")
 
         # Step dots
         self._dots = ctk.CTkFrame(self._header, fg_color="transparent")
-        self._dots.grid(row=0, column=1, rowspan=2, sticky="e")
+        self._dots.grid(row=0, column=1, rowspan=3, sticky="e")
         self._dot_labels = []
         for i in range(3):
             dot = ctk.CTkLabel(self._dots, text="●", font=("Arial", 12), text_color=self.TEXT_SECONDARY)
@@ -74,8 +84,14 @@ class FirstRunWizard(ctk.CTkToplevel):
     def _center_on_parent(self):
         self.update_idletasks()
         parent = self.winfo_toplevel()
-        px = parent.winfo_x() + (parent.winfo_width() - self.winfo_width()) // 2
-        py = parent.winfo_y() + (parent.winfo_height() - self.winfo_height()) // 2
+        if parent.winfo_ismapped():
+            px = parent.winfo_x() + (parent.winfo_width() - self.winfo_width()) // 2
+            py = parent.winfo_y() + (parent.winfo_height() - self.winfo_height()) // 2
+        else:
+            sw = self.winfo_screenwidth()
+            sh = self.winfo_screenheight()
+            px = (sw - self.winfo_width()) // 2
+            py = (sh - self.winfo_height()) // 2
         self.geometry(f"+{px}+{py}")
 
     def _update_dots(self):

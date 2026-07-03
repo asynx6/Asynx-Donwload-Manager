@@ -1,14 +1,28 @@
-import datetime
 import os
 import queue
 import threading
+import datetime
 import customtkinter as ctk
+from PIL import Image
 
 from frontend.ui.api_client import APIClient
 from frontend.ui.components.download_card import DownloadCard
 from frontend.ui.i18n import t
 from frontend.ui.windows.add_download_window import AddDownloadWindow
 from frontend.ui.windows.settings_window import SettingsWindow
+
+
+def _load_logo_image(size=40):
+    """Load the user-provided Logo.png (or generated logo.png) as a CTkImage."""
+    try:
+        for logo_name in ("logo.png", "tray.png"):
+            logo_path = os.path.join(os.path.dirname(__file__), "..", "assets", "icons", logo_name)
+            if os.path.exists(logo_path):
+                img = Image.open(logo_path)
+                return ctk.CTkImage(img, size=(size, size))
+    except Exception:
+        pass
+    return None
 
 
 class MainWindow(ctk.CTkFrame):
@@ -86,15 +100,23 @@ class MainWindow(ctk.CTkFrame):
         # Brand
         brand = ctk.CTkFrame(sidebar, fg_color="transparent")
         brand.grid(row=0, column=0, sticky="ew", padx=20, pady=(24, 16))
-        logo = ctk.CTkLabel(
-            brand, text="A", font=("Arial", 24, "bold"), text_color=self.ACCENT
-        )
-        logo.grid(row=0, column=0)
+        brand.grid_columnconfigure(0, weight=0)
+        brand.grid_columnconfigure(1, weight=1)
+        logo_img = _load_logo_image(size=40)
+        if logo_img:
+            logo = ctk.CTkLabel(brand, image=logo_img, text="")
+            logo.image = logo_img  # keep reference
+            logo.grid(row=0, column=0, sticky="w")
+        else:
+            logo = ctk.CTkLabel(
+                brand, text="📥", font=("Arial", 24, "bold"), text_color=self.ACCENT
+            )
+            logo.grid(row=0, column=0, sticky="w")
         title = ctk.CTkLabel(
             brand, text=t("app.title"), font=("Arial", 18, "bold"),
             text_color=self.TEXT_PRIMARY
         )
-        title.grid(row=0, column=1, padx=(8, 0))
+        title.grid(row=0, column=1, sticky="w", padx=(12, 0))
 
         version = ctk.CTkLabel(
             sidebar, text=t("app.version"), font=("Arial", 11),

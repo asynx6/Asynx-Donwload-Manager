@@ -4,7 +4,8 @@ import customtkinter as ctk
 
 from frontend.ui.api_client import APIClient
 from frontend.ui.components.progress_bar import ProgressBar
-from frontend.ui.components.format_utils import format_size, format_time
+from frontend.ui.components.format_utils import format_size, format_speed, format_time
+from frontend.ui.components.confirm_dialog import ask_yes_no
 from frontend.ui.i18n import t
 
 
@@ -43,7 +44,7 @@ class DownloadCard(ctk.CTkFrame):
         header.grid_columnconfigure(1, weight=1)
 
         self._icon_label = ctk.CTkLabel(
-            header, text="A", font=("Arial", 18, "bold"),
+            header, text="📥", font=("Arial", 18, "bold"),
             text_color=self.STATUS_COLORS.get(self._status, self.STATUS_COLORS["PENDING"])[0]
         )
         self._icon_label.grid(row=0, column=0, sticky="w")
@@ -131,9 +132,21 @@ class DownloadCard(ctk.CTkFrame):
             corner_radius=10, font=("Arial", 12),
             fg_color=("#FEE2E2", "#3F1818"), text_color=("#DC2626", "#FCA5A5"),
             hover_color=("#FECACA", "#522424"),
-            command=self._delete
+            command=self._delete,
         )
         self._btn_delete.grid(row=0, column=3, padx=(8, 0))
+
+        # Hapus-dari-Riwayat: muncul hanya saat COMPLETED/ERROR/CANCELLED.
+        self._btn_remove_history = ctk.CTkButton(
+            self._btn_frame, text=t("btn.remove_history", default="Remove from History"),
+            width=160, height=34,
+            corner_radius=10, font=("Arial", 12),
+            fg_color=("#E0E7FF", "#312E81"), text_color=("#4338CA", "#C7D2FE"),
+            hover_color=("#C7D2FE", "#3730A3"),
+            command=self._remove_history,
+        )
+        self._btn_remove_history.grid(row=0, column=4, padx=(8, 0))
+        self._btn_remove_history.grid_remove()
 
         self.update_view(data)
 
@@ -163,7 +176,7 @@ class DownloadCard(ctk.CTkFrame):
         speed = data.get("speed_kbps", 0.0)
         eta = data.get("eta_seconds", 0)
         if self._status == "DOWNLOADING":
-            self._speed_label.configure(text=f"{speed:.0f} KB/s")
+            self._speed_label.configure(text=format_speed(speed))
             self._eta_label.configure(text=f"{format_time(eta)}")
         elif self._status == "COMPLETED":
             self._speed_label.configure(text=t("status.completed"))
@@ -196,10 +209,29 @@ class DownloadCard(ctk.CTkFrame):
             self._btn_folder.grid_remove()
             self._btn_run.grid_remove()
 
+        # Tombol Hapus dari Riwayat: visible saat status non-aktif.
+        if self._status in ("COMPLETED", "ERROR", "CANCELLED"):
+            self._btn_remove_history.grid()
+        else:
+            self._btn_remove_history.grid_remove()
+
         self.update_idletasks()
 
     def _toggle_action(self):
         if self._status in ("DOWNLOADING", "PENDING"):
+            # Konfirmasi pause.
+            try:
+                ok = ask_yes_no(
+                    self.winfo_toplevel(),
+                    title=t("dlg.pause.title", default="Pause Download?"),
+                    message=t("dlg.pause.body",
+                              default=f"Pause \"{self._filename}\"?\nProgress will be saved."),
+                    danger=False,
+                )
+            except Exception:
+                ok = True
+            if not ok:
+                return
             threading.Thread(target=self._api.pause, args=(self._task_id,), daemon=True).start()
         elif self._status in ("PAUSED", "ERROR"):
             threading.Thread(target=self._api.resume, args=(self._task_id,), daemon=True).start()
@@ -215,6 +247,49 @@ class DownloadCard(ctk.CTkFrame):
             self._api.run_file(path)
 
     def _delete(self):
-        threading.Thread(target=self._api.delete, args=(self._task_id, True), daemon=True).start()
+        """Hapus download. Konfirmasi via dialog danger."""
+        try:
+            ok = ask_yes_no(
+                self.winfo_toplevel(),
+                title=t("dlg.delete.title", default="Delete Download?"),
+                message=t("dlg.delete.body",
+                          default=f"Permanently delete \"{self._filename}\" "
+                                  "and remove its history?\n\n"
+                                  "This action cannot be undone."),
+                yes_label=t("btn.delete", default="Delete"),
+                danger=True,
+            )
+        except Exception:
+            ok = True
+        if not ok:
+            return
+        threading.Thread(
+            target=self._api.delete,
+            args=(self._task_id, True, False),
+            daemon=True,
+        ).start()
+        if self._on_change:
+            self._on_change()
+
+    def _remove_history(self):
+        """Hapus permanen dari history (folder completed/) + bersihkan parts."""
+        try:
+            ok = ask_yes_no(
+                self.winfo_toplevel(),
+                title=t("dlg.remove_history.title", default="Remove from History?"),
+                message=t("dlg.remove_history.body",
+                          default=f"Remove \"{self._filename}\" from history?\n\n"
+                                  "Downloaded file (if any) will be kept on disk."),
+                danger=True,
+            )
+        except Exception:
+            ok = True
+        if not ok:
+            return
+        threading.Thread(
+            target=self._api.remove_history,
+            args=(self._task_id, True),
+            daemon=True,
+        ).start()
         if self._on_change:
             self._on_change()

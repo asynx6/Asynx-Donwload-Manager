@@ -23,8 +23,10 @@ from .speed_limiter import SpeedLimiter
 
 _USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AsynxDL/1.0"
 
-# 64KB streaming buffer — keeps RAM low and avoids fragmentation
-_CHUNK_BUFFER = 64 * 1024
+# 32KB streaming buffer — konservatif untuk RAM 4GB & jaringan lambat.
+# Tetap cukup besar untuk throughput modem 100Mbps; lebih sedikit syscall
+# vs 8KB, lebih rendah overhead RAM vs 64KB.
+_CHUNK_BUFFER = 32 * 1024
 
 _MAX_RETRIES = 5
 _RETRY_BACKOFF_FACTOR = 1.0

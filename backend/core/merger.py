@@ -46,12 +46,11 @@ def merge_parts(part_files: list[str], output_path: str,
         return False
     os.makedirs(out_dir, exist_ok=True)
 
-    # Pastikan semua part file berada dalam folder yang sama (atau subfolder)
-    safe_base = os.path.abspath(out_dir)
+    # Pastikan semua part file ada
     for part_file in part_files:
         part_abs = os.path.abspath(os.path.expandvars(os.path.expanduser(part_file)))
-        if not part_abs.startswith(safe_base + os.sep) and part_abs != safe_base:
-            print(f"[ERROR] Merger: part file outside output directory: {part_file}")
+        if not os.path.exists(part_abs):
+            print(f"[ERROR] Merger: part file missing: {part_file}")
             return False
 
     try:

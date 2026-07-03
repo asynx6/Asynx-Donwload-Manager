@@ -10,11 +10,14 @@ Fungsi:
     - resolve_duplicate_name(folder, filename) → str
     - normalize_path(path) → str
     - is_safe_path(base_dir, target_path) → bool
+    - url_basename(url) → str
+    - resolve_filename(user_input, url_filename, url) → str
 """
 
 import os
 import re
 import shutil
+from urllib.parse import urlparse, unquote
 
 # Karakter ilegal di Windows: \ / : * ? " < > | dan kontrol karakter 0x00-0x1F
 _ILLEGAL_WIN = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
@@ -89,3 +92,50 @@ def is_safe_path(base_dir: str, target_path: str) -> bool:
     base = os.path.abspath(normalize_path(base_dir))
     target = os.path.abspath(normalize_path(target_path))
     return os.path.commonpath([base, target]) == base
+
+
+def url_basename(url: str) -> str:
+    """Ekstrak nama file dari URL dengan URL-decode (fix bug 'A').
+
+    Contoh:
+        'https://x.com/path/Grand%20Theft%20Auto.rar'
+            -> 'Grand Theft Auto.rar'
+        'https://x.com/file/'                  -> ''
+        'https://x.com/file'                   -> 'file'
+    """
+    if not url:
+        return ""
+    try:
+        path = urlparse(url).path or ""
+    except Exception:
+        return ""
+    name = os.path.basename(path.rstrip("/"))
+    if not name:
+        return ""
+    try:
+        return unquote(name)
+    except Exception:
+        return name
+
+
+def resolve_filename(user_input: str, url_filename: str, url: str) -> str:
+    """Tentukan nama file final yang akan digunakan untuk tampilan & save.
+
+    Urutan prioritas:
+        1. ``user_input`` (override eksplisit dari UI / extension)
+        2. ``url_filename`` (dari header Content-Disposition server)
+        3. ``url_basename(url)`` (dari URL path, URL-decoded)
+        4. ``"unnamed_file"`` (fallback sanitized)
+
+    Output sudah di-sanitize supaya aman untuk Windows.
+
+    Catatan: ``download_card.py`` icon lama default-nya huruf ``"A"`` -
+    function ini menjamin string yang dikembalikan bukan placeholder
+    melainkan nama file asli dari URL / server.
+    """
+    candidates = [user_input or "", url_filename or "", url_basename(url) or ""]
+    for cand in candidates:
+        sanitized = sanitize_filename(cand)
+        if sanitized and sanitized != "unnamed_file":
+            return sanitized
+    return "unnamed_file"

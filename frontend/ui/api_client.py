@@ -51,24 +51,55 @@ class APIClient:
         return resp.json()
 
     def pause(self, task_id: str) -> dict:
-        resp = requests.patch(f"{self._base_url}/downloads/{task_id}/pause", headers=self.headers(), timeout=10)
-        resp.raise_for_status()
-        return resp.json()
+        try:
+            resp = requests.patch(f"{self._base_url}/downloads/{task_id}/pause", headers=self.headers(), timeout=10)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as exc:
+            print(f"[APIClient] pause failed: {exc}")
+            return {"error": str(exc)}
 
     def resume(self, task_id: str) -> dict:
-        resp = requests.patch(f"{self._base_url}/downloads/{task_id}/resume", headers=self.headers(), timeout=10)
-        resp.raise_for_status()
-        return resp.json()
+        try:
+            resp = requests.patch(f"{self._base_url}/downloads/{task_id}/resume", headers=self.headers(), timeout=10)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as exc:
+            print(f"[APIClient] resume failed: {exc}")
+            return {"error": str(exc)}
 
-    def delete(self, task_id: str, delete_parts: bool = True) -> dict:
-        resp = requests.delete(
-            f"{self._base_url}/downloads/{task_id}",
-            params={"delete_parts": delete_parts},
-            headers=self.headers(),
-            timeout=10,
-        )
-        resp.raise_for_status()
-        return resp.json()
+    def delete(self, task_id: str, delete_parts: bool = True,
+               remove_from_history: bool = False) -> dict:
+        """Hapus download dari list aktif. ``remove_from_history=True``
+        ikut membersihkan history completed/."""
+        try:
+            resp = requests.delete(
+                f"{self._base_url}/downloads/{task_id}",
+                params={"delete_parts": str(delete_parts).lower(),
+                        "remove_from_history": str(remove_from_history).lower()},
+                headers=self.headers(),
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as exc:
+            print(f"[APIClient] delete failed: {exc}")
+            return {"error": str(exc)}
+
+    def remove_history(self, task_id: str, delete_parts: bool = True) -> dict:
+        """Hapus permanen task dari history completed/ + bersihkan parts."""
+        try:
+            resp = requests.patch(
+                f"{self._base_url}/downloads/{task_id}/remove_history",
+                params={"delete_parts": str(delete_parts).lower()},
+                headers=self.headers(),
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as exc:
+            print(f"[APIClient] remove_history failed: {exc}")
+            return {"error": str(exc)}
 
     def get_settings(self) -> dict:
         resp = requests.get(f"{self._base_url}/settings", headers=self.headers(), timeout=10)

@@ -61,8 +61,26 @@ async def resume_download(task_id: str):
 
 
 @router.delete("/{task_id}")
-async def delete_download(task_id: str, delete_parts: bool = True):
-    result = manager.delete(task_id, delete_parts=delete_parts)
+async def delete_download(
+    task_id: str,
+    delete_parts: bool = True,
+    remove_from_history: bool = False,
+):
+    """Hapus download active. ``remove_from_history=True`` juga menghapus
+    history completed/ kalau task ada di sana."""
+    result = manager.delete(
+        task_id, delete_parts=delete_parts, remove_from_history=remove_from_history
+    )
+    if "error" in result:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@router.patch("/{task_id}/remove_history")
+async def remove_history(task_id: str, delete_parts: bool = True):
+    """Hapus permanen dari history completed/ + bersihkan parts."""
+    result = manager.remove_history(task_id, delete_parts=delete_parts)
     if "error" in result:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail=result["error"])

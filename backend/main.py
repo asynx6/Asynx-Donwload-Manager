@@ -22,6 +22,8 @@ from backend.system.crash_logger import install_crash_handler, redirect_streams_
 from backend.system.tray import TrayIcon
 from frontend.ui.app import AsynxDLApp
 from frontend.ui.windows.first_run_wizard import FirstRunWizard
+from frontend.ui.i18n import t
+import customtkinter as ctk
 
 
 def _is_another_instance_running(port: int) -> bool:
@@ -34,12 +36,23 @@ def _is_another_instance_running(port: int) -> bool:
         return False
 
 
+_BACKOFF_STEPS = (0.2, 0.4, 0.8, 1.5, 2.0)  # seconds -- exponential-ish
+
+
 def _wait_for_backend(timeout: int = 10) -> bool:
+    """Tunggu backend /status sampai ready dengan exponential backoff.
+
+    Logika:
+    - Mulai dengan delay kecil 200ms.
+    - Setiap gagal, naikkan delay hingga max 2s.
+    - Kalau timeout habis sebelum 200 OK, return False.
+    """
     import requests
     config = load_config()
     port = config.get("api_port", 58296)
     url = f"http://127.0.0.1:{port}/status"
     start = time.time()
+    attempt = 0
     while time.time() - start < timeout:
         try:
             resp = requests.get(url, timeout=1)
@@ -47,7 +60,9 @@ def _wait_for_backend(timeout: int = 10) -> bool:
                 return True
         except Exception:
             pass
-        time.sleep(0.2)
+        delay = _BACKOFF_STEPS[min(attempt, len(_BACKOFF_STEPS) - 1)]
+        time.sleep(delay)
+        attempt += 1
     return False
 
 
@@ -61,7 +76,9 @@ def main():
     port = config.get("api_port", 58296)
 
     if _is_another_instance_running(port):
-        print("[WARN] AsynxDL is already running. Only one instance is allowed.")
+        # Kedua instance mencoba pakai port yang sama akan
+        # blocking start_server_thread. Pre-empt langsung.
+        print("[INFO] AsynxDL already running, exiting.")
         sys.exit(0)
 
     # Start FastAPI server di thread daemon
@@ -70,23 +87,37 @@ def main():
         print("[ERROR] Backend server tidak dapat di-start.")
         sys.exit(1)
 
-    # Inisialisasi UI root (window disembunyikan dulu)
+    # Cek apakah perlu wizard pertama kali
     needs_wizard = is_first_run() or args.first_run
-    app = AsynxDLApp(minimized=needs_wizard or args.minimized)
 
-    # First-run wizard
     if needs_wizard:
-        def on_finish():
-            app.show_window()
+        # Create a hidden root so the wizard is the only visible window on launch.
+        root = ctk.CTk()
+        root.withdraw()
+        root.title(t("app.title"))
 
-        wizard = FirstRunWizard(app._root, on_finish=on_finish)
+        def on_finish():
+            pass
+
+        wizard = FirstRunWizard(root, on_finish=on_finish)
+        wizard.transient(root)
         wizard.grab_set()
-        app._root.wait_window(wizard)
-        # Jika wizard ditutup sebelum selesai, tetap tampilkan window
+        wizard.lift()
+        wizard.focus_force()
+        root.wait_window(wizard)
+
         if not load_config().get("first_run_completed"):
-            app.show_window()
-    elif not args.minimized:
-        # Pastikan window utama terlihat saat launch normal
+            print("[INFO] First-run wizard tidak diselesaikan. Keluar.")
+            sys.exit(0)
+
+        # After wizard is completed, create the real dashboard using the same root
+        # so the dashboard appears exactly once and the wizard is gone.
+        app = AsynxDLApp(root=root, minimized=args.minimized)
+    else:
+        app = AsynxDLApp(minimized=args.minimized)
+
+    # Pastikan window utama terlihat saat launch normal (bukan minimized)
+    if not args.minimized:
         app.show_window()
 
     app.run()

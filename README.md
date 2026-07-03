@@ -1,20 +1,26 @@
 # AsynxDL — Advanced Download Manager
 
 <p align="center">
-  <img src="frontend/ui/assets/icons/app.png" alt="AsynxDL Logo" width="96">
+  <img src="frontend/ui/assets/icons/logo.png" alt="AsynxDL Logo" width="96">
 </p>
 
 <p align="center">
   <strong>Multi-threaded, resumable, desktop download manager for Windows</strong><br>
-  Built with Python · FastAPI · CustomTkinter · Chrome Extension
+  Built with Python · FastAPI · CustomTkinter · Chromium Extension
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/platform-Windows-blue.svg" alt="Windows">
+  <img src="https://img.shields.io/badge/python-3.14-blue.svg" alt="Python 3.14">
 </p>
 
 <p align="center">
   <a href="#download">Download</a> ·
   <a href="#features">Features</a> ·
   <a href="#installation">Installation</a> ·
-  <a href="#extension">Chrome Extension</a> ·
-  <a href="#contributing">Contributing</a>
+  <a href="#extension">Extension</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
 ---
@@ -29,7 +35,7 @@ Pre-built installer and portable executable are available in the [Releases](http
 | `dist/AsynxDL_Debug.exe` | Console version for debugging; run from cmd to see errors |
 | `dist/AsynxDL_Setup_v1.0.0.exe` | Windows installer with desktop shortcut & extension |
 
-> **Troubleshooting startup issues:** If `AsynxDL.exe` does not show a window, run `dist/AsynxDL_Debug.exe` from a terminal and check the log files in `%LOCALAPPDATA%\AsynxDL\logs\` (`app.log`, `crash-*.log`, `state.log`).
+> **Troubleshooting startup issues:** If `AsynxDL.exe` does not show a window after double-clicking, run `dist/AsynxDL_Debug.exe` from a terminal and check the log files in `%LOCALAPPDATA%\AsynxDL\logs\` (`app.log`, `crash-*.log`, `state.log`). The installer has also been tested with silent install/uninstall and cleans up the program directory and app data automatically.
 
 ---
 
@@ -55,7 +61,7 @@ Pre-built installer and portable executable are available in the [Releases](http
 3. Choose whether to create a desktop shortcut.
 4. Launch **AsynxDL** from the Start Menu or desktop shortcut.
 
-> **Note:** The installer installs the app to `%LOCALAPPDATA%\Programs\AsynxDL` and stores your settings in `%APPDATA%\AsynxDL`. On first launch, the app shows a setup wizard to choose language, default download folder, and copy the secret token for the browser extension.
+> **Note:** The installer installs the app to `%LOCALAPPDATA%\Programs\AsynxDL` and stores your settings in `%APPDATA%\AsynxDL`. On first launch, the app shows a setup wizard to choose language, default download folder, and copy the secret token for the browser extension. The uninstaller removes the program directory, app data, and any leftover `.parts` folder automatically.
 
 ### Option B: Portable Executable
 
@@ -75,15 +81,17 @@ python -m backend.main
 
 ---
 
-## Chrome Extension
+## Browser Extension
 
-1. Open Chrome and go to `chrome://extensions/`.
+AsynxDL ships with a Chromium-based browser extension (Manifest V3). It works with Google Chrome, Microsoft Edge, Brave, Opera, and other Chromium browsers.
+
+1. Open your browser and go to the extensions page (`chrome://extensions/` or `edge://extensions/`).
 2. Enable **Developer mode** (toggle in the top-right corner).
-3. Click **Load unpacked** and select the folder `extension/browser/` (or `C:\Program Files\AsynxDL\extension` after installation).
+3. Click **Load unpacked** and select the folder `extension/browser/` (or `%LOCALAPPDATA%\Programs\AsynxDL\extension` after installation).
 4. Open the AsynxDL desktop app, go through the first-run wizard, and copy the **Secret Token**.
 5. Click the AsynxDL extension icon → **Options**, paste the token, and click **Save Token**.
 
-After setup, the extension will intercept downloads in Chrome and ask you to confirm them in the AsynxDL app.
+After setup, the extension will intercept downloads in your browser and ask you to confirm them in the AsynxDL app.
 
 ---
 
@@ -158,18 +166,19 @@ AsynxDL/
 
 ## Troubleshooting
 
-### App starts but no window appears
+### App starts but no window appears after double-clicking
 
-1. Check Task Manager for a process named `AsynxDL.exe`. If it exists, the app is running but the window may be off-screen or hidden.
-2. Run `dist/AsynxDL_Debug.exe` from PowerShell or CMD to see real-time output.
-3. Check the log directory:
+1. Wait 5–10 seconds. The app may still be initializing the local API server.
+2. Check Task Manager for a process named `AsynxDL.exe`. If it exists, the app is running but the window may be off-screen or hidden.
+3. Run `dist/AsynxDL_Debug.exe` from PowerShell or CMD to see real-time output.
+4. Check the log directory:
    ```
    %LOCALAPPDATA%\AsynxDL\logs\
    ```
    - `app.log` — stdout/stderr output
    - `crash-*.log` — uncaught Python exceptions
    - `state.log` — window geometry and visibility state
-4. If the app is stuck, kill it from Task Manager and try again.
+5. If the app is stuck, kill it from Task Manager and try again.
 
 ### Uninstaller leaves files behind
 
@@ -184,9 +193,14 @@ If you still need to remove leftovers manually, delete:
 
 ## Contributing
 
-We welcome contributions from the community!
+We welcome contributions from the community. Please read [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide, including how to:
 
-### How to Contribute
+- Set up your development environment
+- Follow the code style
+- Run tests
+- Open a Pull Request
+
+A quick summary:
 
 1. **Fork** the repository and clone your fork.
 2. Create a new branch for your feature or bug fix:

@@ -39,8 +39,9 @@ data/queue/*.part*
 *.part7
 testfile.bin
 
-#Openclaude
+#ai
 .openclaude/
+.agents/
 
 # PyInstaller output
 dist/
