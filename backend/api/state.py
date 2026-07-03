@@ -271,14 +271,44 @@ class DownloadManager:
 
     def delete(self, task_id: str, delete_parts: bool = True,
                remove_from_history: bool = False) -> dict:
+        meta_removed = False
         with self._lock:
             task = self._active.pop(task_id, None)
         if task:
             task.cancel()
-            # Tetap hapus metadata jika ada di history completed/
+            # Bug-1 fix: extract metadata BEFORE deleting file supaya kita
+            # bisa dapat parts_dir + chunks untuk membersihkan part files di
+            # lokasi yang benar (bukan default AsynxDL/.parts).
+            existing_meta = self._meta_mgr.load(task_id) or {}
+            parts_dir = existing_meta.get(
+                "parts_dir",
+                os.path.dirname(existing_meta.get("save_path", "")),
+            )
+            chunks = existing_meta.get("chunks", []) or []
+            if self._meta_mgr.delete(task_id):
+                meta_removed = True
+            # Bersihkan parts di parts_dir yang benar dari metadata.
+            try:
+                from backend.core.parts_dir import purge_all_parts_for, purge_all_orphans
+                purge_all_parts_for(task_id, parts_dir=parts_dir)
+                purge_all_orphans()
+            except Exception:
+                pass
+            if delete_parts and chunks and parts_dir:
+                import glob
+                for part in glob.glob(os.path.join(parts_dir, f"{task_id}.part*")):
+                    try:
+                        os.remove(part)
+                    except FileNotFoundError:
+                        pass
+                final_temp = os.path.join(parts_dir, f"{task_id}.final")
+                try:
+                    os.remove(final_temp)
+                except FileNotFoundError:
+                    pass
             if remove_from_history:
                 self._meta_mgr.remove_from_history(task_id)
-            return {"ok": True}
+            return {"ok": True, "meta_removed": meta_removed}
         meta = self._meta_mgr.load(task_id)
         if not meta:
             # 404 fix: kalau tidak ada di folder active tapi ada di history,

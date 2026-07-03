@@ -10,6 +10,7 @@ Menjalankan urutan startup:
 
 import argparse
 import os
+import socket
 import sys
 import threading
 import time
@@ -27,43 +28,57 @@ import customtkinter as ctk
 
 
 def _is_another_instance_running(port: int) -> bool:
-    """Check whether another AsynxDL process is already serving the API port."""
+    """Bug-2 fix: socket-based port probe (<10 ms) replaces HTTP probe.
+    Bonus: tidak perlu `requests` overhead / TLS negotiation dance."""
+    host = "127.0.0.1"
     try:
-        import requests
-        resp = requests.get(f"http://127.0.0.1:{port}/status", timeout=1.5)
-        return resp.status_code == 200
-    except Exception:
+        with socket.create_connection((host, port), timeout=0.4):
+            return True
+    except (ConnectionRefusedError, OSError, socket.timeout):
         return False
 
 
-_BACKOFF_STEPS = (0.2, 0.4, 0.8, 1.5, 2.0)  # seconds -- exponential-ish
+# Bug-2 fix: tighter backoff sequence — worst case ~0.7 s total. Sebelumnya
+# (0.2, 0.4, 0.8, 1.5, 2.0) = ~5 s worst case. Server sudah di-spawn di
+# thread namun uvicorn boot memerlukan sedikit waktu warm-up.
+_BACKOFF_STEPS = (0.05, 0.05, 0.1, 0.2, 0.3)
 
 
-def _wait_for_backend(timeout: int = 10) -> bool:
-    """Tunggu backend /status sampai ready dengan exponential backoff.
+def _wait_for_backend(timeout: int = 5) -> bool:
+    """Tunggu backend /status sampai ready dengan backoff yang lebih ketat.
 
-    Logika:
-    - Mulai dengan delay kecil 200ms.
-    - Setiap gagal, naikkan delay hingga max 2s.
-    - Kalau timeout habis sebelum 200 OK, return False.
+    v1.0.2: total worst case timeout 5 s (dari 10 s) + probe lebih responsif.
     """
-    import requests
     config = load_config()
     port = config.get("api_port", 58296)
     url = f"http://127.0.0.1:{port}/status"
     start = time.time()
     attempt = 0
     while time.time() - start < timeout:
+        # Fast-path: socket probe (no full HTTP roundtrip)
         try:
-            resp = requests.get(url, timeout=1)
-            if resp.status_code == 200:
-                return True
-        except Exception:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                # Kalau socket OK, kirim HTTP kecil untuk verifikasi.
+                try:
+                    resp = _quick_http_get(url, timeout=0.5)
+                    if resp == 200:
+                        return True
+                except Exception:
+                    pass
+        except (ConnectionRefusedError, OSError, socket.timeout):
             pass
         delay = _BACKOFF_STEPS[min(attempt, len(_BACKOFF_STEPS) - 1)]
         time.sleep(delay)
         attempt += 1
     return False
+
+
+def _quick_http_get(url: str, timeout: float = 0.5) -> int:
+    """Minimal HTTP/1.0 GET — pakai urllib (built-in) yang ringan."""
+    import urllib.request
+    req = urllib.request.Request(url, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.status
 
 
 def main():

@@ -22,7 +22,7 @@ Thank you for your interest in making AsynxDL better! This document explains how
 1. **Fork** the repository on GitHub.
 2. **Clone** your fork locally:
    ```powershell
-   git clone https://github.com/YOUR_USERNAME/Asynx-Donwload-Manager.git
+   git clone https://github.com/asynx6/Asynx-Donwload-Manager.git
    cd Asynx-Donwload-Manager
    ```
 3. **Install dependencies**:

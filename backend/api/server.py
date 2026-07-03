@@ -22,11 +22,22 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        download_manager.recover()
+        # Bug-2 fix: recovery stranded tasks dijalankan di background thread
+        # supaya uvicorn bisa langsung bind socket (HTTP serve ready lebih
+        # cepat). Tasks akan dipulihkan tanpa blocking startup.
+        def _delayed_recover():
+            try:
+                recovered = download_manager.recover()
+                if recovered:
+                    print(f"[AsynxDL] Background recovery: "
+                          f"{len(recovered)} tasks restored.")
+            except Exception as exc:
+                print(f"[AsynxDL] Background recovery failed: {exc}")
+        threading.Thread(target=_delayed_recover, daemon=True).start()
         yield
         download_manager.shutdown()
 
-    app = FastAPI(title="AsynxDL", version="1.0.0", lifespan=lifespan)
+    app = FastAPI(title="AsynxDL", version="1.0.2", lifespan=lifespan)
 
     app.add_middleware(
         CORSMiddleware,
@@ -51,10 +62,14 @@ def run_server(port: int = 58296, host: str = "127.0.0.1"):
 
 
 def start_server_thread(port: int = 58296) -> threading.Thread:
-    """Start uvicorn server in a daemon thread."""
+    """Start uvicorn server in a daemon thread. v1.0.2: no blocking sleep.
+
+    Bug-2 fix: time.sleep(1.0) unconditional sebelumnya menambahkan +1 s
+    ke setiap launch. Sekarang caller (_wait_for_backend) yang polling
+    dengan backoff agresif sehingga boot time tetap konsisten.
+    """
     t = threading.Thread(target=run_server, args=(port,), daemon=True)
     t.start()
-    time.sleep(1.0)
     return t
 
 

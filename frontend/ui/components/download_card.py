@@ -247,7 +247,10 @@ class DownloadCard(ctk.CTkFrame):
             self._api.run_file(path)
 
     def _delete(self):
-        """Hapus download. Konfirmasi via dialog danger."""
+        """Hapus download. Card instan hilang dari UI + konfirmasi danger.
+        Default v1.0.2: remove_from_history=True (full purge), supaya card
+        tidak muncul lagi dari folder completed/ pada poll berikutnya.
+        """
         try:
             ok = ask_yes_no(
                 self.winfo_toplevel(),
@@ -263,13 +266,31 @@ class DownloadCard(ctk.CTkFrame):
             ok = True
         if not ok:
             return
-        threading.Thread(
-            target=self._api.delete,
-            args=(self._task_id, True, False),
-            daemon=True,
-        ).start()
-        if self._on_change:
-            self._on_change()
+        task_id = self._task_id
+
+        # Bug-1 fix: instan hapus card dari UI (sebelum HTTP round-trip).
+        # Master window akan discard orphan card di _render() berikutnya
+        # sehingga tidak ada "kedip" / card balik dari history.
+        def _vanish():
+            try:
+                self.destroy()
+            except Exception:
+                pass
+        try:
+            self.master.after(0, _vanish)
+        except Exception:
+            pass
+
+        def _do_delete():
+            result = self._api.delete(task_id, True, True)
+            if isinstance(result, dict) and result.get("error"):
+                # Kalau backend reject, restore by triggering parent refresh.
+                if self._on_change:
+                    try:
+                        self._on_change()
+                    except Exception:
+                        pass
+        threading.Thread(target=_do_delete, daemon=True).start()
 
     def _remove_history(self):
         """Hapus permanen dari history (folder completed/) + bersihkan parts."""

@@ -30,14 +30,13 @@ class AsynxDLApp:
         ctk.set_appearance_mode(theme)
         ctk.set_default_color_theme("dark-blue")
 
-        # Center window on screen
-        self._root.update_idletasks()
-        sw = self._root.winfo_screenwidth()
-        sh = self._root.winfo_screenheight()
-        w, h = 1000, 680
-        x = (sw - w) // 2
-        y = (sh - h) // 2
-        self._root.geometry(f"{w}x{h}+{x}+{y}")
+        # Center window on screen — non-blocking calc untuk hindari round-trip
+        # ke display; kalau screen size belum siap fallback ke default.
+        sw = self._root.winfo_screenwidth() or 1920
+        sh = self._root.winfo_screenheight() or 1080
+        x = max(0, (sw - 1000) // 2)
+        y = max(0, (sh - 680) // 2)
+        self._root.geometry(f"1000x680+{x}+{y}")
 
         # Use Arial as the default safe Windows font
         try:
@@ -51,7 +50,16 @@ class AsynxDLApp:
 
         self._tray_icon: TrayIcon | None = None
         self._setup_window_behavior()
-        self._load_icon()
+
+        # Bug-2 fix: defer icon load supaya first-paint tidak blocking
+        # pada image decode + wm_iconphoto call (200-400 ms biasanya).
+        if not minimized:
+            try:
+                self._root.after(30, self._load_icon)
+            except Exception:
+                pass
+        else:
+            self._load_icon()
 
         if minimized:
             self._root.withdraw()

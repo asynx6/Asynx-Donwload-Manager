@@ -68,7 +68,7 @@ class SplashWindow:
 
         ctk.CTkLabel(
             self._root,
-            text="v1.0.1",
+            text="v1.0.2",
             font=("Arial", 9),
             fg_color="#1E1E2E",
             text_color="#888888",

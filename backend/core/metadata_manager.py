@@ -249,18 +249,22 @@ class MetadataManager:
                 f.flush()
                 os.fsync(f.fileno())
 
-    def delete(self, task_id: str):
+    def delete(self, task_id: str) -> bool:
         """Hapus file metadata untuk task tertentu.
 
         Args:
             task_id: UUID task download.
+
+        Returns:
+            True jika file metadata aktif ada & hilang, False jika tidak ada.
         """
         path = self._metadata_path(task_id)
         with self._lock:
             try:
                 os.remove(path)
+                return True
             except FileNotFoundError:
-                pass
+                return False
 
     def list_all(self, status_filter: list[str] | None = None) -> list[dict]:
         """List semua metadata task di queue.

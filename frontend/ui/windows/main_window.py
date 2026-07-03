@@ -267,15 +267,31 @@ class MainWindow(ctk.CTkFrame):
             self._load_data()
 
     def _render(self, items: list[dict]):
+        # Track IDs yang muncul di response iterasi sekarang.
+        received_ids: set[str] = set()
         for item in items:
             task_id = item.get("id")
             if not task_id:
                 continue
+            received_ids.add(task_id)
             if task_id in self._cards:
                 self._cards[task_id].update_view(item)
             else:
                 card = DownloadCard(self._list_frame, self._api, item, on_change=self._load_data)
                 self._cards[task_id] = card
+
+        # Bug-1 fix: discard cards yang tidak ada di response (mungkin sudah
+        # dihapus di iteration sebelumnya atau dihapus sebelum poll berikutnya
+        # tiba). Tanpa ini card tetap terlihat meskipun metadata sudah hilang.
+        stale = [tid for tid in list(self._cards.keys()) if tid not in received_ids]
+        for tid in stale:
+            card = self._cards.pop(tid, None)
+            if card is not None:
+                try:
+                    card.destroy()
+                except Exception:
+                    pass
+
         self._apply_filter()
 
     def _apply_filter(self):
