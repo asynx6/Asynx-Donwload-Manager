@@ -212,6 +212,16 @@ class MainWindow(ctk.CTkFrame):
                 mapped = root.winfo_ismapped()
                 with open(state_path, "a", encoding="utf-8") as f:
                     f.write(f"{datetime.datetime.now().isoformat()} state={state} geometry={geom} mapped={mapped}\n")
+                # Audit-fix M4: rotate state.log saat >256KB (1 rolling backup).
+                try:
+                    if os.path.getsize(state_path) > 256 * 1024:
+                        bak = state_path + ".1"
+                        try:
+                            os.replace(state_path, bak)
+                        except OSError:
+                            pass
+                except OSError:
+                    pass
             except Exception:
                 pass
             try:

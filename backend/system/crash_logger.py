@@ -72,12 +72,23 @@ def install_crash_handler():
 
 
 def run_with_crash_logging(target, *args, **kwargs):
-    """Jalankan fungsi target dengan crash logging aktif."""
+    """Jalankan fungsi target dengan crash logging aktif.
+
+    Audit-fix M3: simpan sys.excepthook sementara dan kembalikan ke default
+    sebelum raise, supaya exception propagation ke atas tidak memanggil
+    hook lagi (yang akan menyebabkan double-log ke file crash yang sama).
+    """
     install_crash_handler()
     try:
         return target(*args, **kwargs)
     except Exception:
-        _write_crash_report(*sys.exc_info())
+        # Restore default hook supaya raise di bawah tidak memicu log ganda.
+        prev_hook = sys.excepthook
+        sys.excepthook = sys.__excepthook__
+        try:
+            _write_crash_report(*sys.exc_info())
+        finally:
+            sys.excepthook = prev_hook
         raise
 
 

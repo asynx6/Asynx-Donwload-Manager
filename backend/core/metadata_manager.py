@@ -96,9 +96,11 @@ class MetadataManager:
                 except FileNotFoundError:
                     pass
             except OSError as exc:
-                # Fallback: keep at src so state isn't lost
-                self.update(task_id, status="COMPLETED", completed_at=now, **extra)
-                return self.load(task_id)
+                # Audit-fix M5: log warning, return None agar caller tahu
+                # migrasi ke completed/ gagal. File tetap di folder active dan
+                # UI Home tab akan reload + menampilkan COMPLETED dengan benar.
+                print(f"[MetadataManager] mark_completed move failed: {exc}")
+                return None
         return data
 
     def remove_from_history(self, task_id: str) -> bool:

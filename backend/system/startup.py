@@ -24,7 +24,14 @@ def set_startup(enabled: bool):
         base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         exe = os.path.join(base, "backend", "main.py")
 
-    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_KEY, 0, winreg.KEY_SET_VALUE)
+    # Audit-fix M2: profile Windows yang sangat ketat (HKCU read-only atau
+    # subkey Run belum pernah dibuat → FileNotFoundError). Fallback CreateKey.
+    try:
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, REG_KEY, 0, winreg.KEY_SET_VALUE
+        )
+    except FileNotFoundError:
+        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REG_KEY)
     try:
         if enabled:
             winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, f'"{exe}" --minimized')
