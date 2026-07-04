@@ -57,6 +57,16 @@ a = Analysis(
         'asyncio.windows_events',
         # Phase-D intelligence engine: rotasi User-Agent + httpx http2 opsional.
         'httpx',
+        # Phase-F: pydantic_core (Rust binary pyd). Setelah execv-relaunch,
+        # bundle kadang tidak me-collect ``_pydantic_core.pyd``. Hiddenimport
+        # ini sebagai fallback tambahan selain runtime_hook yang me-pre-import.
+        'pydantic_core',
+        'pydantic_core._pydantic_core',
+        # Phase-G: unicodedata (stdlib C-extension). Setelah restart via
+        # execv, bootloader lupa extract ``unicodedata.pyd`` sehingga chain
+        # ``requests -> idna -> unicodedata`` gagal.
+        'unicodedata',
+        'idna',
     ],
     hookspath=[],
     hooksconfig={},

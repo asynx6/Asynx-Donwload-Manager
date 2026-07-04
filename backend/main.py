@@ -58,6 +58,23 @@ def _ensure_overlapped() -> bool:
 _ensure_overlapped()
 
 
+def _preheat_pydantic_core() -> None:
+    """Panaskan ``pydantic_core._pydantic_core`` (Rust-binary pyd) SEBELUM
+    ``fastapi`` / ``pydantic`` import.
+
+    Sama dengan ``_overlapped``: kalau bootloader lupa collect binary ini
+    di re-spawn ``os.execv`` (mode Restart Now), interpreter gagal import
+    di ``fastapi.routing → fastapi.params → pydantic → pydantic_core``.
+    Pre-bundle hook sudah pre-import, tapi untuk safety belt-and-suspenders
+    kita panggil juga di sini (pre-import idempotent).
+    """
+    for _name in ("pydantic_core", "pydantic_core._pydantic_core"):
+        try:
+            importlib.import_module(_name)
+        except Exception:
+            pass
+
+
 def _preheat_uvicorn_runtime() -> None:
     """Panaskan asyncio + windows_events SEBELUM uvicorn import.
 
@@ -79,6 +96,24 @@ def _preheat_uvicorn_runtime() -> None:
         pass
 
 
+def _preheat_stdlib_extensions() -> None:
+    """Panaskan stdlib C-extension (unicodedata, _overlapped, dll.) +
+
+    deps 3rd-party (``idna``) supaya restart-via-execv tidak gagal import.
+    Idempotent & best-effort.
+    """
+    for _name in (
+        "unicodedata",
+        "idna",
+    ):
+        try:
+            importlib.import_module(_name)
+        except Exception:
+            pass
+
+
+_preheat_stdlib_extensions()
+_preheat_pydantic_core()
 _preheat_uvicorn_runtime()
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

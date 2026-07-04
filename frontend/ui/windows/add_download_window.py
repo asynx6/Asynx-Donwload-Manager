@@ -39,8 +39,9 @@ class AddDownloadWindow(ctk.CTkToplevel):
         tk = theme.tokens(mode)
         super().__init__(master, fg_color=tk["BG2"], **kwargs)
         self.title(t("add.title"))
-        self.geometry("540x460")
-        self.resizable(False, False)
+        # Window auto-resized + sedikit lebih tinggi untuk footer besar.
+        self.geometry("560x520")
+        self.minsize(520, 480)
         self._api = api
         self._on_added = on_added
         self._default_path = default_path
@@ -48,13 +49,72 @@ class AddDownloadWindow(ctk.CTkToplevel):
         self._valid_url = False
         self.configure(fg_color=tk["BG2"])
 
-        # Center on parent
-        self.update_idletasks()
+        # Center on parent -- DEFER + CLAMP to monitor.
+        # ``update_idletasks`` sebelum window mapped dapat membaca
+        # ``winfo_x/y`` yang masih -1 atau koordinat-asal virtual (saat
+        # process di-spawn dari main window di secondary monitor, px/py
+        # bisa negatif besar sehingga window 'nembus' ke luar layar).
+        # Solusi: defer centering ke 80ms setelah mapped, kemudian clamp
+        # coords ke dalam work-area monitor aktif.
         try:
-            parent = self.winfo_toplevel()
-            px = parent.winfo_x() + (parent.winfo_width() - 540) // 2
-            py = parent.winfo_y() + (parent.winfo_height() - 460) // 2
-            self.geometry(f"540x460+{px}+{py}")
+            self.transient(self.winfo_toplevel())
+        except Exception:
+            pass
+        self.after(80, self._center_safe)
+        self.after(120, self._focus_url)
+
+    def _center_safe(self) -> None:
+        """Re-center jendela SETELAH mapped, dengan clamp ke monitor.
+
+        Mengambil work-area monitor aktif (termasuk DPI adjustment),
+        memposisikan window sedekat mungkin ke parent tetapi tetap
+        di dalam layar agar selalu draggable.
+        """
+        try:
+            self.update_idletasks()
+            W, H = 560, 520
+            # Fall back to display info dari self jika tidak punya parent.
+            try:
+                parent = self.winfo_toplevel()
+                pw, ph = parent.winfo_width(), parent.winfo_height()
+                px, py = parent.winfo_x(), parent.winfo_y()
+                # Hindari parent coords negative/big (multi-monitor).
+                if px < 0 or py < 0 or pw < 100 or ph < 100:
+                    raise ValueError("bad parent")
+                cx = px + (pw - W) // 2
+                cy = py + (ph - H) // 2
+            except Exception:
+                cx, cy = None, None
+
+            # Query monitor work-area (handles multi-monitor + DPI).
+            if cx is None:
+                try:
+                    sw = self.winfo_screenwidth()
+                    sh = self.winfo_screenheight()
+                    cx = (sw - W) // 2
+                    cy = (sh - H) // 2
+                except Exception:
+                    cx, cy = 80, 80
+
+            # Hard clamp inside primary monitor work-area.
+            try:
+                sw = self.winfo_screenwidth()
+                sh = self.winfo_screenheight()
+                cx = max(0, min(int(cx), int(sw - W)))
+                cy = max(0, min(int(cy), int(sh - H)))
+            except Exception:
+                pass
+
+            self.geometry(f"{W}x{H}+{cx}+{cy}")
+            self.lift()
+            self.update_idletasks()
+        except Exception:
+            pass
+
+    def _focus_url(self) -> None:
+        """Focus ke URL field SETELAH window sudah mapped & centered."""
+        try:
+            self._entry_url.focus_force()
         except Exception:
             pass
 
@@ -104,26 +164,32 @@ class AddDownloadWindow(ctk.CTkToplevel):
                      wraplength=480).grid(row=5, column=0, sticky="w",
                                           pady=(0, 6))
 
-        # Footer - primary [⬇ Unduh] only (auto-destructive)
-        foot = ctk.CTkFrame(self, fg_color="transparent",
-                            corner_radius=theme.CORNER_NONE)
-        foot.pack(fill="x", padx=10, pady=(0, 10))
-        foot.grid_columnconfigure(0, weight=1)
-        foot.grid_columnconfigure(1, weight=0)
-
-        # Spacer kiri
-        ctk.CTkLabel(foot, text="", fg_color="transparent").grid(
-            row=0, column=0, sticky="ew")
+        # ----------------------------------------------------------------
+        # Footer — primary full-width "⬇ Start Download" button at bottom.
+        # Brutalist style: bordered, big, prominent di paling bawah window
+        # sehingga user tidak bingung mencari tombol action-nya.
+        # ----------------------------------------------------------------
+        foot = ctk.CTkFrame(self, fg_color=tk["BG3"],
+                            corner_radius=theme.CORNER_NONE,
+                            border_width=1, border_color=tk["BORDER"])
+        foot.pack(fill="x", padx=10, pady=(6, 10))
+        foot.pack_propagate(False)
+        foot.configure(height=56)
 
         self._btn_download = ctk.CTkButton(
-            foot, text=t("btn.download", default="⬇ Unduh"),
-            width=170, height=theme.BUTTON_HEIGHT,
-            corner_radius=theme.CORNER_NONE, font=theme.font(11, bold=True),
+            foot,
+            text=t("btn.start", default="⬇ Start Download"),
+            height=42,
+            corner_radius=theme.CORNER_NONE,
+            font=theme.font(12, bold=True),
             fg_color=tk["ACCENT"], hover_color=tk["ACCENT_H"],
             text_color=tk["SEL_FG"], border_width=1,
-            border_color=tk["BORDER2"], command=self._start,
+            border_color=tk["BORDER2"],
+            command=self._start,
         )
-        self._btn_download.grid(row=0, column=1)
+        # fill+expand = full-width bottom button yang paling jelas terlihat.
+        self._btn_download.pack(side="left", fill="both", expand=True,
+                                padx=8, pady=6)
         # Disable awal sampai URL valid.
         self._set_button_enabled(False)
 
