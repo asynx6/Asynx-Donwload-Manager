@@ -269,6 +269,7 @@ class DownloadCard(ctk.CTkFrame):
                     message=t("dlg.pause.body",
                               default=f"Pause \"{self._filename}\"?\nProgress akan disimpan."),
                     danger=False,
+                    mode=self._mode,
                 )
             except Exception as exc:
                 print(f"[DownloadCard] pause-confirm error: {exc}")
@@ -299,6 +300,7 @@ class DownloadCard(ctk.CTkFrame):
                           default=f"Hapus permanen \"{self._filename}\" dan riwayatnya?\n\nTidak bisa dibatalkan."),
                 yes_label=t("btn.delete", default="Hapus"),
                 danger=True,
+                mode=self._mode,
             )
         except Exception as exc:
             print(f"[DownloadCard] delete-confirm error: {exc}")
@@ -333,6 +335,7 @@ class DownloadCard(ctk.CTkFrame):
                 message=t("dlg.remove_history.body",
                           default=f"Hapus \"{self._filename}\" dari riwayat?\n\nFile hasil download (kalau ada) tidak dihapus dari disk."),
                 danger=True,
+                mode=self._mode,
             ):
                 return
         except Exception:

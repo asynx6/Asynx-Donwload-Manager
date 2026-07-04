@@ -191,7 +191,12 @@ class HomePanel(ctk.CTkFrame):
         if not self._api:
             return
         path = (self._settings or {}).get("default_download_path", "") or os.path.expandvars("%USERPROFILE%\\Downloads")
-        win = AddDownloadWindow(self, self._api, on_added=self._load_data, default_path=path)
+        win = AddDownloadWindow(
+            self, self._api,
+            on_added=self._load_data,
+            default_path=path,
+            mode=self._mode,
+        )
         try:
             win.grab_set()
         except Exception:

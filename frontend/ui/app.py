@@ -5,6 +5,7 @@ C:\\Users\\asynx\\Downloads\\AsynxDL\\Logo.png atau fallback ke icon lokal.
 """
 
 import os
+import sys
 import threading
 import tkinter as tk
 
@@ -199,6 +200,10 @@ class AsynxDLApp:
             self._root.destroy()
         except Exception:
             pass
+        # P1-3 patch (audit_findings.md): deterministic process exit
+        # agar daemon threads (pystray / chunk_workers) tidak menahan
+        # process dari keluar dengan benar.
+        sys.exit(0)
 
     def run(self) -> None:
         def _heartbeat() -> None:

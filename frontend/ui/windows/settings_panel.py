@@ -371,6 +371,7 @@ class SettingsPanel(ctk.CTkFrame):
                             default="Restart Required"),
                     message=t("dialogs.restart.body",
                               default="Some changes require a restart to fully apply."),
+                    mode=self._mode,
                 )
                 if choice == "now":
                     import os as _os, sys as _sys

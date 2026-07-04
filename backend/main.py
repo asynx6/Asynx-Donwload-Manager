@@ -17,6 +17,21 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# `_overlapped` adalah C extension Windows yang dipakai oleh ProactorEventLoop
+# (default uvicorn). PyInstaller satu-file kadang tidak meng-collect-nya secara
+# otomatis untuk second launch via os.execv — tambahkan eksplisit di sini agar
+# asyncio.windows_events import-nya stabil sehingga restart tidak lagi
+# menghasilkan: ModuleNotFoundError: No module named '_overlapped'.
+try:
+    import _overlapped  # noqa: F401
+except Exception:
+    # Di dev-mode (running via interpreter biasa), stdlib sudah auto-load.
+    # Pada bundle-mode satu-file, _overlapped.pyd di-bundle lewat hiddenimports
+    # di build/asynxdl.spec; force-import ini memastikan ia terekstrak sebelum
+    # backend.api.server menyentuh asyncio.
+    if getattr(sys, "frozen", False):
+        raise
+
 from backend.api.server import start_server_thread
 from backend.system.config import is_first_run, load_config
 from backend.system.crash_logger import install_crash_handler, redirect_streams_to_log, run_with_crash_logging
@@ -92,8 +107,20 @@ def main():
 
     if _is_another_instance_running(port):
         # Kedua instance mencoba pakai port yang sama akan
-        # blocking start_server_thread. Pre-empt langsung.
-        print("[INFO] AsynxDL already running, exiting.")
+        # blocking start_server_thread. Pre-empt langsung,
+        # tapi sebelum exit: signal existing instance untuk restore
+        # window-nya (kalau dia di-tray), supaya user yang double-click
+        # app icon merasakan app muncul, bukan silent no-op.
+        print("[INFO] AsynxDL already running, signaling existing instance.")
+        try:
+            from backend.system.instance import signal_existing_window_to_show
+            restored = signal_existing_window_to_show("AsynxDL")
+            if restored:
+                print("[INFO] Existing window restored to foreground.")
+            else:
+                print("[INFO] Existing window not found by title (likely tray-only).")
+        except Exception as exc:  # pragma: no cover - defensive
+            print(f"[WARN] signal_existing_instance failed: {exc}")
         sys.exit(0)
 
     # Start FastAPI server di thread daemon
