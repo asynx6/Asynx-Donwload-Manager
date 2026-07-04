@@ -110,7 +110,7 @@ class HomePanel(ctk.CTkFrame):
 
         self._btn_add = ctk.CTkButton(
             toolbar,
-            text=f"+ {t('btn.add')}",
+            text=f"+ {t('btn.download', default='⬇ Download')}",
             width=130, height=theme.BUTTON_HEIGHT,
             corner_radius=theme.CORNER_NONE,
             font=theme.font(12, bold=True),

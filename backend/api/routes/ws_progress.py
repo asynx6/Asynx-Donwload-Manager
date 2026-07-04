@@ -1,15 +1,19 @@
-"""
-AsynxDL — WebSocket Progress Route
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Endpoint /ws/progress untuk push real-time progress ke UI.
+"""AsynxDL — WebSocket Progress Route.
+
+Audit-fix v1.1.0:
+    - ``verify_token_string`` (HMAC compare_digest) menggantikan ``==`` untuk
+      avoid timing attack.
+    - Empty/placeholder token di config = auto-reject upgrade.
 """
 
 import asyncio
+import hmac
 from typing import Set
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 
-from backend.api.auth import verify_token
-from backend.system.config import load_config
+from backend.api.auth import verify_token_string, _load_real_token
+from backend.api.state import manager as download_manager
 
 router = APIRouter()
 
@@ -34,7 +38,7 @@ class ConnectionManager:
         """Broadcast JSON ke semua koneksi aktif."""
         async with self._lock:
             connections = list(self._connections)
-        dead = set()
+        dead: set[WebSocket] = set()
         for conn in connections:
             try:
                 await conn.send_json(message)
@@ -48,20 +52,15 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-def _verify_query_token(token: str) -> bool:
-    expected = load_config().get("api_secret_token")
-    return token == expected
-
-
 @router.websocket("/ws/progress")
 async def ws_progress(websocket: WebSocket, token: str = Query(...)):
-    if not _verify_query_token(token):
-        await websocket.close(code=1008)
+    if not _load_real_token() or not verify_token_string(token):
+        # Reject sebelum accept() supaya client tidak mendapatkan partial frame.
+        await websocket.close(code=1008, reason="forbidden")
         return
     await manager.connect(websocket)
     try:
         while True:
-            # Keep connection alive; client bisa kirim ping
             data = await websocket.receive_text()
             if data == "ping":
                 await websocket.send_text("pong")
@@ -77,11 +76,8 @@ def broadcast_progress(message: dict):
         loop = asyncio.get_running_loop()
         asyncio.run_coroutine_threadsafe(manager.broadcast(message), loop)
     except RuntimeError:
-        # Tidak ada event loop running (misal saat test sync)
         pass
 
 
 # Register callback ke DownloadManager
-from backend.api.state import manager as download_manager
-
 download_manager.set_progress_callback(broadcast_progress)

@@ -196,12 +196,23 @@ class MetadataManager:
         if parts_dir:
             metadata["parts_dir"] = parts_dir
 
+        # Atomic write: write to <path>.tmp then os.replace()
+        path = self._metadata_path(task_id)
         with self._lock:
-            with open(self._metadata_path(task_id), "w", encoding="utf-8") as f:
-                json.dump(metadata, f, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
-
+            tmp = path.with_suffix(".tmp")
+            try:
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(metadata, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, path)
+            except OSError as exc:
+                # Cleanup tmp best-effort
+                try:
+                    os.remove(tmp)
+                except FileNotFoundError:
+                    pass
+                raise
         return metadata
 
     def load(self, task_id: str) -> dict | None:
@@ -228,10 +239,8 @@ class MetadataManager:
 
         Field yang di-update langsung di-merge ke dict yang ada.
         'updated_at' otomatis diperbarui ke timestamp saat ini.
-
-        Args:
-            task_id: UUID task download.
-            **kwargs: Field yang akan di-update (status, downloaded_size, chunks, dll).
+        Implementasi atomic: tulis ke ``.tmp`` lalu ``os.replace()`` untuk
+        mencegah file korup saat listrik mati / window crash.
         """
         path = self._metadata_path(task_id)
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -246,10 +255,19 @@ class MetadataManager:
             data.update(kwargs)
             data["updated_at"] = now
 
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
+            try:
+                tmp = path.with_suffix(".tmp")
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, path)
+            except OSError as exc:
+                try:
+                    os.remove(tmp)
+                except FileNotFoundError:
+                    pass
+                print(f"[MetadataManager] atomic update failed: {exc}")
 
     def delete(self, task_id: str) -> bool:
         """Hapus file metadata untuk task tertentu.
@@ -318,10 +336,19 @@ class MetadataManager:
             data["downloaded_size"] = downloaded_size
             data["updated_at"] = now
 
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
+            try:
+                tmp = path.with_suffix(".tmp")
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, path)
+            except OSError as exc:
+                try:
+                    os.remove(tmp)
+                except FileNotFoundError:
+                    pass
+                print(f"[MetadataManager] update_chunk_progress atomic failed: {exc}")
 
     def recover_crashed_tasks(self) -> list[dict]:
         """Saat boot: temukan task yang belum selesai dan tandai crash.

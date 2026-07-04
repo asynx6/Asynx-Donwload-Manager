@@ -395,6 +395,31 @@ class DownloadManager:
                     self._active[task_id] = task
         return [self._task_info(t) for t in self._active.values()]
 
+    def sjf_order(self) -> list[str]:
+        """Strategy #8 — Shortest-Job-First queue order.
+
+        Urutkan task PENDING/PAUSED berdasarkan ``total_size`` ascending.
+        Dipakai otomatis saat ``max_concurrent_downloads`` slot tersedia.
+        Caller boleh disable via config flag ``sjf_enabled=False``.
+        """
+        with self._lock:
+            pending = [
+                t for t in self._active.values()
+                if t.status in ("PENDING", "PAUSED") and t.total_size > 0
+            ]
+        pending.sort(key=lambda t: getattr(t, "_total_size", 0) or 0)
+        return [t.task_id for t in pending]  # type: ignore[attr-defined]
+
+    def enqueue_sjf(self) -> int:
+        """Jalankan SJF ordering & start; return jumlah task dimulai."""
+        started = 0
+        for _ in self.sjf_order():
+            if self._try_start_pending():
+                started += 1
+            else:
+                break
+        return started
+
     def pause_all(self):
         with self._lock:
             tasks = list(self._active.values())

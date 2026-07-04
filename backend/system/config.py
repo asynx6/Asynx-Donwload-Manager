@@ -68,27 +68,49 @@ def load_config() -> dict[str, Any]:
     return merged
 
 
-def save_config(config: dict[str, Any]) -> None:
-    """Simpan config ke disk."""
-    _config_dir().mkdir(parents=True, exist_ok=True)
-    path = _config_path()
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
+def save_config(config: dict[str, Any]) -> bool:
+    """Simpan config ke disk secara atomic.
+
+    Returns True jika sukses. Best-effort swallow OSError; caller bisa
+    membatalkan aksi kalau return False.
+    """
+    try:
+        _config_dir().mkdir(parents=True, exist_ok=True)
+        path = _config_path()
+        tmp = path.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+        return True
+    except OSError as exc:
+        try:
+            os.remove(tmp)
+        except (FileNotFoundError, UnboundLocalError):
+            pass
+        print(f"[Config] save failed: {exc}")
+        return False
+    except Exception as exc:
+        print(f"[Config] unexpected save failure: {exc}")
+        return False
 
 
-def update_config(**kwargs) -> dict[str, Any]:
-    """Update beberapa field config dan simpan."""
+def update_config(**kwargs) -> dict[str, Any] | None:
+    """Update beberapa field config dan simpan. None jika save gagal."""
     config = load_config()
     config.update(kwargs)
-    save_config(config)
+    if not save_config(config):
+        return None
     return config
 
 
 def is_first_run() -> bool:
-    return not load_config().get("first_run_completed", False)
+    try:
+        return not load_config().get("first_run_completed", False)
+    except Exception:
+        return False
 
 
-def mark_first_run_completed() -> None:
-    update_config(first_run_completed=True)
+def mark_first_run_completed() -> bool:
+    return bool(update_config(first_run_completed=True))

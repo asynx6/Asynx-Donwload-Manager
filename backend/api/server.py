@@ -1,8 +1,9 @@
 """
 AsynxDL — FastAPI Server
 ~~~~~~~~~~~~~~~~~~~~~~~~~
-Assembly FastAPI app, middleware, router, and uvicorn runner.
-Hardened: only localhost, strict CORS, 127.0.0.1 binding.
+Assembly FastAPI app, middleware, router, dan uvicorn runner.
+Hardened: only localhost, strict CORS, 127.0.0.1 binding, Host defense,
+sliding-window rate limit.
 """
 
 import threading
@@ -12,6 +13,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.api.middleware import HeaderDefenseMiddleware, RateLimitMiddleware
 from backend.api.routes import status, downloads, settings, ws_progress
 from backend.api.state import manager as download_manager
 from backend.system.config import load_config
@@ -22,10 +24,7 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        # Bug-2 fix: recovery stranded tasks dijalankan di background thread
-        # supaya uvicorn bisa langsung bind socket (HTTP serve ready lebih
-        # cepat). Tasks akan dipulihkan tanpa blocking startup.
-        def _delayed_recover():
+        def _delayed_recover() -> None:
             try:
                 recovered = download_manager.recover()
                 if recovered:
@@ -37,8 +36,11 @@ def create_app() -> FastAPI:
         yield
         download_manager.shutdown()
 
-    app = FastAPI(title="AsynxDL", version="1.0.2", lifespan=lifespan)
+    app = FastAPI(title="AsynxDL", version="1.0.7", lifespan=lifespan)
 
+    # ------------------------------------------------------------- middleware
+    # Order matters: Header defense → CORS → Rate limit → router.
+    app.add_middleware(HeaderDefenseMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://127.0.0.1"],
@@ -46,7 +48,9 @@ def create_app() -> FastAPI:
         allow_headers=["X-AsynxDL-Token", "Content-Type"],
         allow_credentials=False,
     )
+    app.add_middleware(RateLimitMiddleware, max_requests=60, window=60)
 
+    # ------------------------------------------------------------- routes
     app.include_router(status.router)
     app.include_router(downloads.router, prefix="/downloads")
     app.include_router(settings.router, prefix="/settings")
@@ -62,11 +66,10 @@ def run_server(port: int = 58296, host: str = "127.0.0.1"):
 
 
 def start_server_thread(port: int = 58296) -> threading.Thread:
-    """Start uvicorn server in a daemon thread. v1.0.2: no blocking sleep.
+    """Start uvicorn server in a daemon thread.
 
-    Bug-2 fix: time.sleep(1.0) unconditional sebelumnya menambahkan +1 s
-    ke setiap launch. Sekarang caller (_wait_for_backend) yang polling
-    dengan backoff agresif sehingga boot time tetap konsisten.
+    Caller ``_wait_for_backend`` melakukan polling agresif (backoff) sehingga
+    boot time tetap konsisten tanpa perlu unconditional sleep di sini.
     """
     t = threading.Thread(target=run_server, args=(port,), daemon=True)
     t.start()

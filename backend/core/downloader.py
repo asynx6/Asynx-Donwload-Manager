@@ -23,6 +23,7 @@ from .merger import merge_parts
 from .metadata_manager import MetadataManager
 from .speed_limiter import SpeedLimiter
 from .parts_dir import get_parts_dir as _get_parts_dir
+import shutil  # used by intelligence strategy DiskGuard
 
 
 # AsynxDL application cache directory under %LOCALAPPDATA%:
@@ -185,9 +186,8 @@ class DownloadTask:
                 self._broadcast_progress()
                 return
 
-            # 4. Hitung chunk count secara dinamis berdasarkan ukuran file
-            #    (lihat chunk_calculator.auto_chunks_for_size). Default static
-            #    ``max_threads_per_download`` jadi upper-cap.
+            # 4. Hitung chunk count secara dinamis berdasarkan ukuran file.
+            #    ``auto_chunks_for_size`` jadi upper-cap (= max_threads).
             if not supports_range:
                 thread_count = 1
             else:
@@ -196,6 +196,43 @@ class DownloadTask:
                     self._total_size,
                     cap=self._max_threads,
                 )
+
+            # 4a. Phase D — Intelligence engine: adaptive threads (overrides
+            # if size <= 1 MB atau is_resume), bandwidth probe, preallocator,
+            # disk guard, mirror failover, dll. Semua strategi no-op by
+            # default, hanya aktif saat caller beri sinyal ``metadata_extra``.
+            try:
+                from .intelligence import decision_for, Policy
+                import shutil
+                free_disk = shutil.disk_usage(
+                    os.path.splitdrive(final_path)[0] or os.path.sep
+                ).free
+                policy = Policy(
+                    total_size=self._total_size,
+                    max_threads=self._max_threads,
+                    supports_range=supports_range,
+                    speed_limit_kbps=self._limiter.limit_kbps,
+                    is_resume=False,
+                    free_disk_bytes=free_disk,
+                    filename=filename,
+                    url=self.url,
+                )
+                plan = decision_for(policy)
+                if plan.actual_threads and plan.actual_threads != thread_count:
+                    thread_count = plan.actual_threads
+                if plan.pause_on_low_disk:
+                    self._status = "ERROR"
+                    self._broadcast_progress()
+                    return
+                if plan.mirror_url and plan.mirror_url != self.url:
+                    try:
+                        self.url = plan.mirror_url
+                    except Exception:
+                        pass
+                if plan.verify_after_merge:
+                    self._meta_mgr.update(self._task_id, verify_after_merge=True)
+            except Exception:
+                pass
 
             parts_dir = _get_parts_dir()
 

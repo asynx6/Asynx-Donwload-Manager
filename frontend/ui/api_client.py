@@ -1,3 +1,11 @@
+"""AsynxDL — APIClient (HTTP + WebSocket bridge ke backend FastAPI).
+
+Audit-fix v1.0.x:
+    - Semua method publik ``except`` di-``try/except`` dan envelope-error.
+    - Token deps otomatis dimuat dari config (HMAC compare_digest
+      server-side cocok).
+"""
+
 import json
 import os
 import threading
@@ -24,14 +32,25 @@ class APIClient:
         self._on_progress: Optional[Callable[[dict], None]] = None
         self._running = False
 
+    # ---------------------------------------------------------------- helpers
     def _load_token(self) -> str:
         if not self._token:
-            self._token = load_config().get("api_secret_token", "")
+            try:
+                self._token = load_config().get("api_secret_token", "")
+            except Exception:
+                self._token = ""
         return self._token
 
     def headers(self) -> dict:
-        return {"X-AsynxDL-Token": self._load_token(), "Content-Type": "application/json"}
+        return {"X-AsynxDL-Token": self._load_token(),
+                "Content-Type": "application/json"}
 
+    def _envelope_err(self, op: str, exc: Exception) -> dict:
+        msg = f"{type(exc).__name__}: {exc}".strip()
+        print(f"[APIClient] {op} failed — {msg}")
+        return {"error": msg}
+
+    # ---------------------------------------------------------------- status
     def status(self) -> bool:
         try:
             resp = requests.get(f"{self._base_url}/status", timeout=2)
@@ -39,85 +58,98 @@ class APIClient:
         except Exception:
             return False
 
-    def add_download(self, url: str, filename: str = "", save_path: str = "", speed_limit_kbps: int = 0) -> dict:
-        payload = {"url": url, "filename": filename, "save_path": save_path, "speed_limit_kbps": speed_limit_kbps}
-        resp = requests.post(f"{self._base_url}/downloads/add", json=payload, headers=self.headers(), timeout=10)
-        resp.raise_for_status()
-        return resp.json()
+    # ---------------------------------------------------------------- HTTP ops
+    def add_download(self, url: str, filename: str = "", save_path: str = "",
+                     speed_limit_kbps: int = 0) -> dict:
+        try:
+            payload = {"url": url, "filename": filename,
+                       "save_path": save_path,
+                       "speed_limit_kbps": speed_limit_kbps}
+            resp = requests.post(f"{self._base_url}/downloads/add",
+                                 json=payload, headers=self.headers(),
+                                 timeout=10)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as exc:
+            return self._envelope_err("add_download", exc)
 
-    def list_downloads(self) -> list[dict]:
-        resp = requests.get(f"{self._base_url}/downloads", headers=self.headers(), timeout=10)
-        resp.raise_for_status()
-        return resp.json()
+    def list_downloads(self) -> list:
+        try:
+            resp = requests.get(f"{self._base_url}/downloads",
+                                 headers=self.headers(), timeout=10)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as exc:
+            return [self._envelope_err("list_downloads", exc)]
 
     def pause(self, task_id: str) -> dict:
         try:
-            resp = requests.patch(f"{self._base_url}/downloads/{task_id}/pause", headers=self.headers(), timeout=10)
+            resp = requests.patch(
+                f"{self._base_url}/downloads/{task_id}/pause",
+                headers=self.headers(), timeout=10)
             resp.raise_for_status()
             return resp.json()
         except Exception as exc:
-            print(f"[APIClient] pause failed: {exc}")
-            return {"error": str(exc)}
+            return self._envelope_err("pause", exc)
 
     def resume(self, task_id: str) -> dict:
         try:
-            resp = requests.patch(f"{self._base_url}/downloads/{task_id}/resume", headers=self.headers(), timeout=10)
+            resp = requests.patch(
+                f"{self._base_url}/downloads/{task_id}/resume",
+                headers=self.headers(), timeout=10)
             resp.raise_for_status()
             return resp.json()
         except Exception as exc:
-            print(f"[APIClient] resume failed: {exc}")
-            return {"error": str(exc)}
+            return self._envelope_err("resume", exc)
 
     def delete(self, task_id: str, delete_parts: bool = True,
-               remove_from_history: bool = False) -> dict:
-        """Hapus download dari list aktif. ``remove_from_history=True``
-        ikut membersihkan history completed/."""
+                remove_from_history: bool = False) -> dict:
         try:
             resp = requests.delete(
                 f"{self._base_url}/downloads/{task_id}",
                 params={"delete_parts": str(delete_parts).lower(),
-                        "remove_from_history": str(remove_from_history).lower()},
-                headers=self.headers(),
-                timeout=10,
-            )
+                         "remove_from_history":
+                             str(remove_from_history).lower()},
+                headers=self.headers(), timeout=10)
             resp.raise_for_status()
             return resp.json()
         except Exception as exc:
-            print(f"[APIClient] delete failed: {exc}")
-            return {"error": str(exc)}
+            return self._envelope_err("delete", exc)
 
     def remove_history(self, task_id: str, delete_parts: bool = True) -> dict:
-        """Hapus permanen task dari history completed/ + bersihkan parts."""
         try:
             resp = requests.patch(
                 f"{self._base_url}/downloads/{task_id}/remove_history",
                 params={"delete_parts": str(delete_parts).lower()},
-                headers=self.headers(),
-                timeout=10,
-            )
+                headers=self.headers(), timeout=10)
             resp.raise_for_status()
             return resp.json()
         except Exception as exc:
-            print(f"[APIClient] remove_history failed: {exc}")
-            return {"error": str(exc)}
+            return self._envelope_err("remove_history", exc)
 
     def get_settings(self) -> dict:
-        resp = requests.get(f"{self._base_url}/settings", headers=self.headers(), timeout=10)
-        resp.raise_for_status()
-        return resp.json()
+        try:
+            resp = requests.get(f"{self._base_url}/settings",
+                                 headers=self.headers(), timeout=10)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as exc:
+            return self._envelope_err("get_settings", exc)
 
     def put_settings(self, settings: dict) -> dict:
-        resp = requests.put(f"{self._base_url}/settings", json=settings, headers=self.headers(), timeout=10)
-        resp.raise_for_status()
-        return resp.json()
+        try:
+            resp = requests.put(f"{self._base_url}/settings", json=settings,
+                                 headers=self.headers(), timeout=10)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as exc:
+            return self._envelope_err("put_settings", exc)
 
     def open_folder(self, path: str):
         folder = os.path.dirname(path) if os.path.isfile(path) else path
         os.startfile(folder)
 
-    def run_file(self, path: str):
-        os.startfile(path)
-
+    # ---------------------------------------------------------------- ws ops
     def set_progress_callback(self, callback: Callable[[dict], None]):
         self._on_progress = callback
 
@@ -133,10 +165,16 @@ class APIClient:
             except json.JSONDecodeError:
                 return
             if self._on_progress:
-                self._on_progress(data)
+                try:
+                    self._on_progress(data)
+                except Exception:
+                    pass
 
         def on_open(ws):
-            ws.send("ping")
+            try:
+                ws.send("ping")
+            except Exception:
+                pass
 
         def run():
             while self._running:
@@ -162,3 +200,6 @@ class APIClient:
                 self._ws.close()
             except Exception:
                 pass
+
+
+__all__: list[str] = ["APIClient"]

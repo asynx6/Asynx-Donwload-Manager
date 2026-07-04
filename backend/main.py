@@ -15,22 +15,73 @@ import sys
 import threading
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# `_overlapped` adalah C extension Windows yang dipakai oleh ProactorEventLoop
-# (default uvicorn). PyInstaller satu-file kadang tidak meng-collect-nya secara
-# otomatis untuk second launch via os.execv — tambahkan eksplisit di sini agar
-# asyncio.windows_events import-nya stabil sehingga restart tidak lagi
-# menghasilkan: ModuleNotFoundError: No module named '_overlapped'.
-try:
-    import _overlapped  # noqa: F401
-except Exception:
-    # Di dev-mode (running via interpreter biasa), stdlib sudah auto-load.
-    # Pada bundle-mode satu-file, _overlapped.pyd di-bundle lewat hiddenimports
-    # di build/asynxdl.spec; force-import ini memastikan ia terekstrak sebelum
-    # backend.api.server menyentuh asyncio.
-    if getattr(sys, "frozen", False):
-        raise
+# Harden: ``_overlapped`` harus siap sebelum siapapun menyentuh
+# ``asyncio.windows_events``. PyInstaller one-file single-exe kadang
+# kelupaan meng-collect C-extension ketika child process di-spawn
+# lagi via ``os.execv`` (kasus Restart Now di RestartDialog).
+#
+# BUG FIX v1.1.0 — belt-and-suspenders:
+#   1. ``sys._overlapped_loaded`` flag agar runtime_hook_overlapped.py
+#      (pre-bundle) bisa menandai keberhasilan.
+#   2. Module-level try-import (di sini).
+#   3. Pre-uvicorn re-preheat di ``_preheat_uvicorn_runtime`` yang
+#      dipanggil sebelum ``start_server_thread``.
+import importlib  # noqa: E402
+
+_sys_overlapped_loaded = False
+
+
+def _ensure_overlapped() -> bool:
+    """Pastikan ``_overlapped.pyd`` (Windows C-extension asyncio)
+    sudah registered sebelum ``backend.api.server`` memanggil
+    ``asyncio.set_event_loop_policy`` atau ``uvicorn.Server.start``.
+
+    Returns True jika siap, False jika gagal (best-effort).
+    """
+    global _sys_overlapped_loaded
+    if _sys_overlapped_loaded:
+        return True
+    try:
+        import _overlapped  # type: ignore  # noqa: F401
+        _sys_overlapped_loaded = True
+        return True
+    except Exception as exc:
+        if getattr(sys, "frozen", False):
+            # Bundle mode: kalau hooks & hiddenimports gagal collect
+            # C-extension ini, paksa raise so PyInstaller diagnostic.
+            # (Dev mode: stdlib otomatis punya _overlapped.pyd.)
+            print(f"[WARN] _overlapped load failed: {exc}")
+        return False
+
+
+_ensure_overlapped()
+
+
+def _preheat_uvicorn_runtime() -> None:
+    """Panaskan asyncio + windows_events SEBELUM uvicorn import.
+
+    ``uvicorn.run`` menggunakan ``ProactorEventLoop`` secara default;
+    loop kelas itu membaca ``_overlapped`` symbols saat inisialisasi.
+    Kita panggil import eksplisit di sini, dengan fallback best-effort.
+    """
+    try:
+        importlib.import_module("_overlapped")
+    except Exception:
+        pass
+    try:
+        importlib.import_module("asyncio")
+    except Exception:
+        pass
+    try:
+        importlib.import_module("asyncio.windows_events")
+    except Exception:
+        pass
+
+
+_preheat_uvicorn_runtime()
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.api.server import start_server_thread
 from backend.system.config import is_first_run, load_config

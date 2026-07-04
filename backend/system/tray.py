@@ -177,12 +177,38 @@ class TrayIcon:
     def run(self):
         import pystray
         self._running = True
-        self._icon = pystray.Icon(
-            "AsynxDL",
-            self._load_icon(),
-            "AsynxDL",
-            self._build_menu(),
-        )
+
+        def on_activate(icon):
+            """Triggered by left-click / double-click on tray icon (Windows).
+
+            Equivalent to clicking the 'Show AsynxDL' default menu item.
+            Fallback path for pystray v0.19+ that may not honor `default=True`
+            consistently across Windows versions.
+            """
+            self._show(icon)
+
+        def on_quit(icon):
+            """Triggered by middle-click / explicit quit gesture on tray icon."""
+            self._exit(icon)
+
+        # Try pystray v0.19+ signatures (default_action, quit_action).
+        # Fallback to legacy form using only menu default=True.
+        try:
+            self._icon = pystray.Icon(
+                "AsynxDL",
+                self._load_icon(),
+                "AsynxDL",
+                self._build_menu(),
+                default_action=on_activate,
+                quit_action=on_quit,
+            )
+        except TypeError:
+            self._icon = pystray.Icon(
+                "AsynxDL",
+                self._load_icon(),
+                "AsynxDL",
+                self._build_menu(),
+            )
         self._icon.run()
 
     def stop(self):
