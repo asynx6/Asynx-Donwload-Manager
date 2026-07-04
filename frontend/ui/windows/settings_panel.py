@@ -374,9 +374,10 @@ class SettingsPanel(ctk.CTkFrame):
                     mode=self._mode,
                 )
                 if choice == "now":
-                    import os as _os, sys as _sys
-                    argv = [_sys.executable] + list(_sys.argv)
-                    _os.execv(_sys.executable, argv)
+                    from frontend.ui.components._relaunch import (
+                        relaunch_subprocess,
+                    )
+                    relaunch_subprocess()
             except Exception as exc:
                 print(f"[SettingsPanel] restart dialog failed: {exc}")
 

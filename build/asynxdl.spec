@@ -76,6 +76,10 @@ a = Analysis(
         # yang muncul ketika user pilih 'Restart Now' (os.execv ulang
         # bootloader).
         str(PROJECT_ROOT / 'build' / 'runtime_hook_overlapped.py'),
+        # Phase-H: wipe orphan ``_MEI*`` tmp dirs agar bootloader extract
+        # berikutnya tidak kena ``FileNotFoundError: base_library.zip``
+        # (gejala remaining dari ``os.execv`` yang dipakai RestartDialog).
+        str(PROJECT_ROOT / 'build' / 'runtime_hook_meipass.py'),
     ],
     excludes=[],
     win_no_prefer_redirects=False,

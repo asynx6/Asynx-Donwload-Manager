@@ -18,6 +18,7 @@ import customtkinter as ctk
 
 from frontend.ui import theme
 from frontend.ui.i18n import t
+from frontend.ui.components._relaunch import relaunch_subprocess  # Phase-H fix
 
 
 def ask_restart_choice(parent, title: str, message: str,
@@ -124,18 +125,16 @@ class RestartDialog(ctk.CTkToplevel):
         self.destroy()
 
     def _restart_now(self) -> None:
-        """Re-launch interpreter (dev mode) atau AsynxDL.exe (bundle mode)."""
+        """Re-launch interpreter (dev mode) atau AsynxDL.exe (bundle mode).
+
+        Phase-H fix: ``os.execv`` di Windows + PyInstaller = broken (orphan
+        ``_MEI*`` + ``FileNotFoundError: base_library.zip``). Pakai
+        ``subprocess.Popen`` untuk spawn process baru + ``os._exit`` untuk
+        terminate parent. Bundle runtime hook ``runtime_hook_meipass.py``
+        membersihkan ``_MEI*`` orphan di tmp sebelum bootloader extract.
+        """
         self.destroy()
-        try:
-            argv = [sys.executable] + list(sys.argv)
-            os.execv(sys.executable, argv)
-        except Exception:
-            # Best-effort fallback.
-            try:
-                root = self.master.winfo_toplevel()
-                root.destroy()
-            except Exception:
-                pass
+        relaunch_subprocess()
 
 
-__all__ = ["ask_restart_choice", "RestartDialog"]
+__all__ = ["ask_restart_choice", "RestartDialog"]  # noqa
