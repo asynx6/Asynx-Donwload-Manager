@@ -136,11 +136,29 @@ class DownloadCard(ctk.CTkFrame):
 
     # ------------------------------------------------------------------ helpers
 
+    # Map status enum (uppercase dari backend) ke JSON key di bawah i18n/status.*.
+    # Jangan pakai f"status.{status}" — kalau raw status berubah atau ada typo akan
+    # bocor ke UI sebagai literal "status.XYZ".
+    _STATUS_TO_KEY = {
+        "DOWNLOADING":  "status.downloading",
+        "PAUSED":       "status.paused",
+        "COMPLETED":    "status.completed",
+        "ERROR":        "status.error",
+        "PENDING":      "status.pending",
+        "CANCELLED":    "status.cancelled",
+        "INTERRUPTED":  "status.interrupted",
+    }
+
     def _status_text(self) -> str:
-        status = (self._status or "").lower()
-        if self._status == "PAUSED" and not self._data.get("graceful_exit", True):
-            return t("status.interrupted")
-        return t(f"status.{status}", default=self._status)
+        try:
+            if self._status == "PAUSED" and not self._data.get("graceful_exit", True):
+                return t("status.interrupted")
+        except Exception:
+            pass
+        key = self._STATUS_TO_KEY.get((self._status or "").upper(), None)
+        if key:
+            return t(key, default=self._status)
+        return self._status or ""
 
     def update_view(self, data: dict) -> None:
         self._data = data

@@ -1,7 +1,11 @@
 {
   "app": {
     "title": "AsynxDL",
-    "version": "v1.0.0"
+    "version": "v1.0.0",
+    "tab": {
+      "home": "Beranda",
+      "setting": "Pengaturan"
+    }
   },
   "btn": {
     "pause": "Jeda",
@@ -18,7 +22,10 @@
     "save": "Simpan",
     "close": "Tutup",
     "start": "Mulai Unduh",
-    "continue": "Lanjutkan"
+    "continue": "Lanjutkan",
+    "remove_history": "Hapus Riwayat",
+    "restart_now": "Mulai Ulang Sekarang",
+    "restart_later": "Nanti Saja"
   },
   "status": {
     "downloading": "Mengunduh",
@@ -34,6 +41,16 @@
     "downloading": "Mengunduh",
     "paused": "Dijeda",
     "completed": "Selesai"
+  },
+  "tb": {
+    "home": {
+      "filter": {
+        "all": "Semua",
+        "active": "Aktif",
+        "paused": "Dijeda",
+        "done": "Selesai"
+      }
+    }
   },
   "toolbar": {
     "search_placeholder": "Cari unduhan...",
@@ -61,7 +78,27 @@
     "theme": "Tema",
     "run_startup": "Jalankan saat Windows Mulai",
     "light": "Terang",
-    "dark": "Gelap"
+    "dark": "Gelap",
+    "saved_hint": "Pengaturan disimpan. Beberapa perubahan butuh restart.",
+    "saved_hint_ok": "Tersimpan."
+  },
+  "dialogs": {
+    "restart": {
+      "title": "Restart Diperlukan",
+      "body": "Perubahan bahasa atau tema butuh restart untuk diterapkan penuh. Restart sekarang atau nanti?"
+    },
+    "delete": {
+      "title": "Hapus Unduhan?",
+      "body": "Aksi ini akan menghapus unduhan dan semua file bagian-nya. Lanjutkan?"
+    },
+    "pause": {
+      "title": "Jeda Unduhan?",
+      "body": "Jeda unduhan ini? Data yang ada tetap aman dan bisa dilanjutkan."
+    },
+    "remove_history": {
+      "title": "Hapus dari Riwayat?",
+      "body": "Aksi ini akan menghapus entri dari daftar. File di disk tidak dihapus."
+    }
   },
   "wizard": {
     "welcome": "Selamat Datang di AsynxDL",

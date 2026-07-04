@@ -4,8 +4,10 @@ __pycache__/
 *$py.class
 *.so
 *.egg-info/
-dist/
-build/
+# PyInstaller intermediate dirs (cache only — keep build/asynxdl.spec etc. tracked)
+build/asynxdl/
+build/asynxdl_debug/
+build/output/
 *.egg
 
 # Virtual environment

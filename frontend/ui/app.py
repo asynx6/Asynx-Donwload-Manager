@@ -72,6 +72,24 @@ class AsynxDLApp:
     # ------------------------------------------------------------------ icon
 
     def _load_icon(self) -> None:
+        """Load window + taskbar icon konsisten dengan Logo.png.
+
+        Prioritas:
+        1. `frontend/ui/assets/icons/app.ico` (sama file yang dipakai PyInstaller
+           untuk embed Windows resource ke .exe).
+        2. `Logo.png` mentah via PIL+ImageTk.PhotoImage → wm_iconphoto.
+        3. Log kalau tidak ada yang ditemukan.
+        """
+        icon_path = os.path.join(
+            os.path.dirname(__file__), "assets", "icons", "app.ico"
+        )
+        if os.path.exists(icon_path):
+            try:
+                self._root.iconbitmap(icon_path)
+                return
+            except Exception as exc:
+                print(f"[AsynxDLApp] iconbitmap {icon_path} failed: {exc}")
+
         try:
             from PIL import Image, ImageTk
             for path in (
@@ -85,11 +103,9 @@ class AsynxDLApp:
                     img_tk = ImageTk.PhotoImage(img)
                     self._root.wm_iconphoto(True, img_tk)
                     return
-            icon_path = os.path.join(os.path.dirname(__file__), "assets", "icons", "app.ico")
-            if os.path.exists(icon_path):
-                self._root.iconbitmap(icon_path)
-        except Exception:
-            pass
+            print("[AsynxDLApp] icon: no app.ico / no Logo.png found")
+        except Exception as exc:
+            print(f"[AsynxDLApp] icon load failed: {exc}")
 
     # ------------------------------------------------------------------ tray
 

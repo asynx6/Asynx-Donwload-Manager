@@ -93,6 +93,65 @@ INPUT_HEIGHT  = 30
 LIST_ROW_HEIGHT = 92
 
 
+def repaint_tokens(root) -> int:
+    """Best-effort: re-paint semua widget Brutalist pada token baru.
+
+    Returns jumlah widget yang di-repaint. Tidak menjamin 100% coverage karena
+    CTk internal state tidak sepenuhnya bisa di-mutate ulang mode-nya. Untuk
+    perubahan theme yang subtle, lebih baik pakai RestartDialog.
+    """
+    try:
+        from .theme import tokens as _tokens
+        return _apply_tokens_recursive(root, _tokens(_current_mode(root)))
+    except Exception:
+        return 0
+
+
+# Internal helper di-namespace akhir agar import mengalir linier.
+
+_CURRENT_MODE = "light"  # default Brutalist
+
+
+def _current_mode(root=None) -> str:
+    """Best-effort lookup mode aktif"""
+    try:
+        if root is not None and hasattr(root, "_asynx_mode"):
+            return root._asynx_mode or "light"
+    except Exception:
+        pass
+    return _CURRENT_MODE
+
+
+def _apply_tokens_recursive(widget, tk: dict) -> int:
+    """Reconfigure fg_color/text_color semua widget Brutalist di-subtree."""
+    count = 0
+    try:
+        try:
+            cfg = widget.configure
+        except Exception:
+            cfg = None
+        if cfg is not None:
+            try:
+                if widget.cget("fg_color") is not None and "BG" in tk:
+                    widget.configure(fg_color=tk.get("BG2", tk.get("BG")))
+            except Exception:
+                pass
+            try:
+                if widget.cget("text_color") is not None and "FG" in tk:
+                    widget.configure(text_color=tk.get("FG"))
+            except Exception:
+                pass
+            count += 1
+    except Exception:
+        pass
+    try:
+        for child in widget.winfo_children():
+            count += _apply_tokens_recursive(child, tk)
+    except Exception:
+        pass
+    return count
+
+
 def apply_window_geometry(root, width: int = 1080, height: int = 720) -> None:
     """Letakkan root window center-screen; ukuran standarm Brutalist."""
     try:

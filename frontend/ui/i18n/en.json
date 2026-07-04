@@ -1,7 +1,11 @@
 {
   "app": {
     "title": "AsynxDL",
-    "version": "v1.0.0"
+    "version": "v1.0.0",
+    "tab": {
+      "home": "Home",
+      "setting": "Settings"
+    }
   },
   "btn": {
     "pause": "Pause",
@@ -18,7 +22,10 @@
     "save": "Save",
     "close": "Close",
     "start": "Start Download",
-    "continue": "Continue"
+    "continue": "Continue",
+    "remove_history": "Remove History",
+    "restart_now": "Restart Now",
+    "restart_later": "Restart Later"
   },
   "status": {
     "downloading": "Downloading",
@@ -34,6 +41,16 @@
     "downloading": "Downloading",
     "paused": "Paused",
     "completed": "Completed"
+  },
+  "tb": {
+    "home": {
+      "filter": {
+        "all": "All",
+        "active": "Active",
+        "paused": "Paused",
+        "done": "Done"
+      }
+    }
   },
   "toolbar": {
     "search_placeholder": "Search downloads...",
@@ -61,7 +78,27 @@
     "theme": "Theme",
     "run_startup": "Run on Windows Startup",
     "light": "Light",
-    "dark": "Dark"
+    "dark": "Dark",
+    "saved_hint": "Settings saved. Some changes require a restart.",
+    "saved_hint_ok": "Saved."
+  },
+  "dialogs": {
+    "restart": {
+      "title": "Restart Required",
+      "body": "Language or theme change requires a restart to fully apply. Restart now or later?"
+    },
+    "delete": {
+      "title": "Delete Download?",
+      "body": "This will remove the download and all its part files. Continue?"
+    },
+    "pause": {
+      "title": "Pause Download?",
+      "body": "Pause this download? Existing data is preserved and can be resumed."
+    },
+    "remove_history": {
+      "title": "Remove from History?",
+      "body": "This will remove the entry from your list. The file on disk is not deleted."
+    }
   },
   "wizard": {
     "welcome": "Welcome to AsynxDL",

@@ -209,14 +209,6 @@ class SettingsPanel(ctk.CTkFrame):
         )
         self._lbl_status.grid(row=0, column=0, sticky="w")
 
-        ctk.CTkButton(
-            footer, text=t("btn.close"), width=90, height=theme.BUTTON_HEIGHT,
-            corner_radius=theme.CORNER_NONE,
-            font=theme.font(11), fg_color="transparent", text_color=tk["FG"],
-            hover_color=tk["SEL_DEEP"], border_width=1, border_color=tk["BORDER"],
-            command=lambda: None
-        ).grid(row=0, column=1, padx=(0, 6))
-
         self._btn_save = ctk.CTkButton(
             footer, text=t("btn.save"), width=110, height=theme.BUTTON_HEIGHT,
             corner_radius=theme.CORNER_NONE,
@@ -225,7 +217,7 @@ class SettingsPanel(ctk.CTkFrame):
             border_width=1, border_color=tk["BORDER2"],
             command=self._save,
         )
-        self._btn_save.grid(row=0, column=2)
+        self._btn_save.grid(row=0, column=1)
 
     def _browse_path(self) -> None:
         path = filedialog.askdirectory()
@@ -283,6 +275,14 @@ class SettingsPanel(ctk.CTkFrame):
             self._w_run_on_startup.select() if self._config.get("run_on_startup", False) else self._w_run_on_startup.deselect()
         except Exception:
             pass
+        # Cache loaded values as baseline supaya _save() dapat membandingkan
+        # apakah language/theme berubah dan membutuhkan restart.
+        try:
+            self._prev_lang_loaded = self._config.get("language", "en")
+            self._prev_theme_loaded = self._config.get("theme", "dark") or "dark"
+        except Exception:
+            self._prev_lang_loaded = "en"
+            self._prev_theme_loaded = "dark"
 
     def _save(self) -> None:
         if not self._api:
@@ -324,10 +324,9 @@ class SettingsPanel(ctk.CTkFrame):
             "theme": theme_val,
             "run_on_startup": startup,
         }
-        try:
-            self._api.put_settings(settings)
-        except Exception as exc:
-            print(f"[SettingsPanel] failed to save: {exc}")
+        # Apply in-process tapi live-redraw belum reliable untuk Brutalist,
+        # sehingga perubahan language/theme akan men-trigger restart dialog
+        # (lihat bawah).
         try:
             set_language(lang)
             ctk.set_appearance_mode(theme_val)
@@ -338,11 +337,54 @@ class SettingsPanel(ctk.CTkFrame):
             self._lbl_status.configure(text=t("settings.saved_hint_ok"))
         except Exception:
             pass
+        # Track language + theme change untuk restart dialog.
+        try:
+            self._prev_lang = lang
+        except Exception:
+            pass
+        try:
+            self._prev_theme = theme_val
+        except Exception:
+            pass
         if callable(self._on_save):
             try:
                 self._on_save()
             except Exception:
                 pass
+
+        # Tampilkan restart dialog kalau language ATAU theme berubah dari
+        # nilai awal yang dimuat saat `_load()`. User bisa pilih Restart Now
+        # (auto-relaunch via os.execv) atau Restart Later (no-op, default).
+        try:
+            prev_lang = getattr(self, "_prev_lang_loaded", None)
+            prev_theme = getattr(self, "_prev_theme_loaded", None)
+            lang_changed = (prev_lang is not None and prev_lang != lang)
+            theme_changed = (prev_theme is not None and prev_theme != theme_val)
+        except Exception:
+            lang_changed = theme_changed = False
+        if lang_changed or theme_changed:
+            try:
+                from frontend.ui.components.restart_dialog import ask_restart_choice
+                choice = ask_restart_choice(
+                    self,
+                    title=t("dialogs.restart.title",
+                            default="Restart Required"),
+                    message=t("dialogs.restart.body",
+                              default="Some changes require a restart to fully apply."),
+                )
+                if choice == "now":
+                    import os as _os, sys as _sys
+                    argv = [_sys.executable] + list(_sys.argv)
+                    _os.execv(_sys.executable, argv)
+            except Exception as exc:
+                print(f"[SettingsPanel] restart dialog failed: {exc}")
+
+        # Update baseline after save so subsequent saves compare to latest.
+        try:
+            self._prev_lang_loaded = lang
+            self._prev_theme_loaded = theme_val
+        except Exception:
+            pass
 
 
 __all__: list[str] = ["SettingsPanel"]

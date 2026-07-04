@@ -3,12 +3,16 @@ import os
 import subprocess
 import sys
 
+from pathlib import Path
+
+project_root = Path(__file__).parent.parent
 ISCC_DEFAULT = r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 ISS_FILE = os.path.abspath("build/installer.iss")
 
 iscc = os.environ.get("ISCC_EXE") or ISCC_DEFAULT
 if not os.path.exists(iscc):
     # Try the 64-bit Program Files location as a fallback.
+    out = project_root / "dist" / "AsynxDL_Setup_v1.0.0.exe"
     alt = r"C:\Program Files\Inno Setup 6\ISCC.exe"
     if os.path.exists(alt):
         iscc = alt
