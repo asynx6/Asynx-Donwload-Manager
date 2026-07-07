@@ -19,7 +19,11 @@ from backend.system.config import load_config
 from backend.system.tray import TrayIcon
 
 
-_LOCAL_LOGO_CANDIDATE = r"C:\Users\asynx\Downloads\AsynxDL\Logo.png"
+# FIX #23: derive path relative to project root instead of hardcoded user path
+_LOCAL_LOGO_CANDIDATE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "Logo.png",
+)
 
 
 class AsynxDLApp:
@@ -52,7 +56,7 @@ class AsynxDLApp:
             pass
 
         self._api = APIClient()
-        self._main = MainWindow(self._root, self._api)
+        self._main = MainWindow(self._root, self._api, on_settings_change=self._on_settings_changed)
         self._main.pack(fill="both", expand=True)
 
         self._tray_icon: TrayIcon | None = None
@@ -162,9 +166,56 @@ class AsynxDLApp:
         self._root.focus_force()
         self._root.attributes("-topmost", True)
         self._root.after(300, lambda: self._root.attributes("-topmost", False))
+        # Saat window dibuka kembali dari tray/background, reload config
+        # supaya perubahan bahasa/tema dari sesi lain langsung kelihatan.
+        try:
+            cfg = load_config()
+            lang = cfg.get("language", "en")
+            theme_mode = cfg.get("theme", "light")
+            if theme_mode not in ("light", "dark"):
+                theme_mode = "light"
+            set_language(lang)
+            ctk.set_appearance_mode(theme_mode)
+            theme.set_mode(theme_mode)
+            self._theme_mode = theme_mode
+        except Exception:
+            pass
+        try:
+            if self._main is not None:
+                self._main.refresh_text()
+        except Exception:
+            pass
+        try:
+            theme.repaint(self._root, mode=self._theme_mode)
+        except Exception:
+            pass
 
     def hide_window(self) -> None:
         self._root.withdraw()
+
+    def _on_settings_changed(self, settings: dict) -> None:
+        """Handler dipanggil MainWindow setelah SettingsPanel berhasil save."""
+        try:
+            cfg = load_config()
+            lang = cfg.get("language", "en")
+            theme_mode = cfg.get("theme", "light")
+            if theme_mode not in ("light", "dark"):
+                theme_mode = "light"
+            set_language(lang)
+            ctk.set_appearance_mode(theme_mode)
+            theme.set_mode(theme_mode)
+            self._theme_mode = theme_mode
+        except Exception:
+            pass
+        try:
+            if self._main is not None:
+                self._main.refresh_text()
+        except Exception:
+            pass
+        try:
+            theme.repaint(self._root, mode=self._theme_mode)
+        except Exception:
+            pass
 
     def open_settings(self) -> None:
         self.show_window()
@@ -186,7 +237,9 @@ class AsynxDLApp:
             self.pause_all()
             # 5.0s grace: allow chunk threads (up to 8 per download) to flush
             # their in-flight writes to .part files before app exits.
-            threading.Event().wait(timeout=5.0)
+            # FIX #25: named constant for shutdown grace period
+            SHUTDOWN_GRACE_SECONDS = 5.0
+            threading.Event().wait(timeout=SHUTDOWN_GRACE_SECONDS)
         except Exception:
             pass
 
@@ -206,6 +259,8 @@ class AsynxDLApp:
         sys.exit(0)
 
     def run(self) -> None:
+        # FIX #20+#28: throttle tray heartbeat from 1500ms to 10s
+        _HEARTBEAT_INTERVAL_MS = 10_000
         def _heartbeat() -> None:
             try:
                 if self._tray_icon is not None:
@@ -213,11 +268,11 @@ class AsynxDLApp:
             except Exception:
                 pass
             try:
-                self._root.after(1500, _heartbeat)
+                self._root.after(_HEARTBEAT_INTERVAL_MS, _heartbeat)
             except Exception:
                 return
         try:
-            self._root.after(1500, _heartbeat)
+            self._root.after(_HEARTBEAT_INTERVAL_MS, _heartbeat)
         except Exception:
             pass
         self._root.mainloop()

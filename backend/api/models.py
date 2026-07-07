@@ -26,9 +26,15 @@ def _reject_path_traversal(path: str) -> str:
     normalized = os.path.normpath(path)
     if normalized.split(os.sep).count("..") > 0 or normalized.startswith(".."):
         raise ValueError("save_path contains '..' path traversal")
-    # 3. Tolak device paths (Windows): ``\\.\``
+    # 3. Tolak device paths (Windows): ``\\.\`` dan ``\\?\``
     if path.replace("/", "\\").startswith("\\\\.\\"):
         raise ValueError("save_path references a device")
+    if path.replace("/", "\\").startswith("\\\\?\\"):
+        raise ValueError("save_path references extended-length path")
+    # 4. SECURITY #14: Tolak UNC paths (``\\server\share``) yang bisa
+    #    mengakses network share Windows.
+    if path.replace("/", "\\").startswith("\\\\"):
+        raise ValueError("save_path references a UNC path")
     return path
 
 

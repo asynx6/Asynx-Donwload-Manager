@@ -52,18 +52,30 @@ def sanitize_filename(name: str) -> str:
     return cleaned[:200]
 
 
+# Batas maksimum probe untuk mencegah infinite loop (BUG #4):
+# jika folder penuh dengan nama sama / permission error, loop berhenti.
+MAX_DUP_PROBES = 9999
+
+
 def resolve_duplicate_name(folder: str, filename: str) -> str:
-    """Jika file sudah ada di folder, tambahkan suffix counter."""
+    """Jika file sudah ada di folder, tambahkan suffix counter.
+
+    Dilengkapi batas ``MAX_DUP_PROBES`` agar tidak masuk infinite loop
+    saat ``os.path.exists`` selalu True (folder penuh / permission issue).
+    """
     base, ext = os.path.splitext(filename)
     target = os.path.join(folder, filename)
     if not os.path.exists(target):
         return filename
     counter = 1
-    while True:
+    while counter <= MAX_DUP_PROBES:
         candidate = f"{base} ({counter}){ext}"
         if not os.path.exists(os.path.join(folder, candidate)):
             return candidate
         counter += 1
+    # Fallback aman: lampirkan timestamp agar unik dan tidak crash.
+    import time as _time
+    return f"{base} ({_time.time_ns()}){ext}"
 
 
 def normalize_path(path: str) -> str:

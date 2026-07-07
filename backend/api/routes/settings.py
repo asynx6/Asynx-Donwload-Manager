@@ -26,8 +26,9 @@ async def get_settings():
 async def put_settings(settings: SettingsModel):
     config = load_config()
     update = settings.model_dump(exclude_unset=True)
-    # Jangan overwrite secret token dengan string kosong dari UI
-    if "api_secret_token" in update and not update["api_secret_token"]:
+    # SECURITY #11: Jangan izinkan perubahan token via PUT.
+    # Token hanya boleh di-generate via endpoint terpisah.
+    if "api_secret_token" in update:
         del update["api_secret_token"]
     config.update(update)
     save_config(config)
@@ -35,6 +36,9 @@ async def put_settings(settings: SettingsModel):
     # Apply runtime settings
     if "max_concurrent_downloads" in update:
         manager.set_max_concurrent(update["max_concurrent_downloads"])
+
+    if "speed_limit_kbps" in update:
+        manager.update_global_speed_limit(update["speed_limit_kbps"])
 
     # Apply startup registry
     if "run_on_startup" in update:

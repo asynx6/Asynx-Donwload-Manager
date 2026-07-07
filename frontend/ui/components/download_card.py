@@ -21,7 +21,7 @@ class DownloadCard(ctk.CTkFrame):
     """Kartu UI Brutalist mono-grey."""
 
     def __init__(self, master, api: APIClient, data: dict, on_change=None, mode: str = "light", **kwargs):
-        tk = theme.tokens(mode)
+        tk = theme.tokens_for(mode)
         super().__init__(
             master,
             corner_radius=theme.CORNER_NONE,
@@ -61,7 +61,7 @@ class DownloadCard(ctk.CTkFrame):
         self._status_label.grid(row=0, column=1, sticky="e", padx=(12, 0))
 
         # Progress bar — mono-grey fill
-        self._progress = ProgressBar(self, height=14, color=tk["PROGRESS"])
+        self._progress = ProgressBar(self, height=14, mode=mode, color=tk["PROGRESS"])
         self._progress.grid(row=1, column=0, columnspan=2, sticky="ew", padx=14, pady=(0, 6))
 
         # Info row
@@ -82,6 +82,8 @@ class DownloadCard(ctk.CTkFrame):
         self._btn_frame = ctk.CTkFrame(self, fg_color="transparent", corner_radius=theme.CORNER_NONE)
         self._btn_frame.grid(row=3, column=0, columnspan=2, sticky="ew", padx=14, pady=(0, 12))
         self._btn_frame.grid_columnconfigure(0, weight=1)
+        self._btn_frame.grid_columnconfigure(1, weight=1)
+        self._btn_frame.grid_columnconfigure(2, weight=1)
 
         self._btn_action = ctk.CTkButton(
             self._btn_frame, text=t("btn.pause"), width=90, height=theme.BUTTON_HEIGHT - 2,
@@ -92,6 +94,15 @@ class DownloadCard(ctk.CTkFrame):
         )
         self._btn_action.grid(row=0, column=0, sticky="w")
 
+        self._btn_cancel = ctk.CTkButton(
+            self._btn_frame, text=t("btn.cancel", default="Batal"), width=90, height=theme.BUTTON_HEIGHT - 2,
+            corner_radius=theme.CORNER_NONE, font=theme.font(11, bold=True),
+            fg_color=tk["SEL_BG"], hover_color=tk["SEL_DEEP"], text_color=tk["SEL_FG"],
+            border_width=1, border_color=tk["BORDER2"],
+            command=self._cancel,
+        )
+        self._btn_cancel.grid(row=0, column=1, padx=6)
+
         self._btn_folder = ctk.CTkButton(
             self._btn_frame, text=t("btn.open_folder"), width=110, height=theme.BUTTON_HEIGHT - 2,
             corner_radius=theme.CORNER_NONE, font=theme.font(10),
@@ -99,7 +110,7 @@ class DownloadCard(ctk.CTkFrame):
             border_width=1, border_color=tk["BORDER"],
             command=self._open_folder,
         )
-        self._btn_folder.grid(row=0, column=1, padx=6)
+        self._btn_folder.grid(row=0, column=0, sticky="w")
         self._btn_folder.grid_remove()
 
         self._btn_run = ctk.CTkButton(
@@ -109,27 +120,18 @@ class DownloadCard(ctk.CTkFrame):
             border_width=1, border_color=tk["BORDER"],
             command=self._run_file,
         )
-        self._btn_run.grid(row=0, column=2, padx=6)
+        self._btn_run.grid(row=0, column=1, padx=6)
         self._btn_run.grid_remove()
-
-        self._btn_delete = ctk.CTkButton(
-            self._btn_frame, text=t("btn.delete"), width=80, height=theme.BUTTON_HEIGHT - 2,
-            corner_radius=theme.CORNER_NONE, font=theme.font(10, bold=True),
-            fg_color=tk["SEL_BG"], hover_color=tk["SEL_DEEP"], text_color=tk["SEL_FG"],
-            border_width=1, border_color=tk["BORDER2"],
-            command=self._delete,
-        )
-        self._btn_delete.grid(row=0, column=3, padx=(6, 0))
 
         self._btn_remove_history = ctk.CTkButton(
             self._btn_frame, text=t("btn.remove_history", default="Hapus Riwayat"),
             width=130, height=theme.BUTTON_HEIGHT - 2,
             corner_radius=theme.CORNER_NONE, font=theme.font(10),
-            fg_color="transparent", hover_color=tk["SEL_DEEP"], text_color=tk["FG"],
-            border_width=1, border_color=tk["BORDER"],
+            fg_color=tk["SEL_BG"], hover_color=tk["SEL_DEEP"], text_color=tk["SEL_FG"],
+            border_width=1, border_color=tk["BORDER2"],
             command=self._remove_history,
         )
-        self._btn_remove_history.grid(row=0, column=4, padx=(6, 0))
+        self._btn_remove_history.grid(row=0, column=2, sticky="e", padx=(6, 0))
         self._btn_remove_history.grid_remove()
 
         self.update_view(data)
@@ -181,9 +183,16 @@ class DownloadCard(ctk.CTkFrame):
 
         speed = data.get("speed_kbps", 0.0)
         eta = data.get("eta_seconds", 0)
+        size_text = f"{format_size(downloaded)} / {format_size(total)}"
+        percent_text = f"{percent:.1f}%"
+
         if self._status == "DOWNLOADING":
             try:
-                self._speed_label.configure(text=format_speed(speed))
+                self._speed_label.configure(text=f"{percent_text}  •  {format_speed(speed)}  •  {size_text}")
+            except Exception:
+                pass
+            try:
+                self._size_label.configure(text="")
             except Exception:
                 pass
             try:
@@ -192,28 +201,27 @@ class DownloadCard(ctk.CTkFrame):
                 pass
         elif self._status == "COMPLETED":
             try:
-                self._speed_label.configure(text=t("status.completed"))
+                self._speed_label.configure(text=f"{percent_text}  •  {t('status.completed')}")
+                self._size_label.configure(text=size_text)
                 self._eta_label.configure(text="")
             except Exception:
                 pass
         elif self._status == "ERROR":
             try:
-                self._speed_label.configure(text=t("status.error"))
+                self._speed_label.configure(text=f"{percent_text}  •  {t('status.error')}")
+                self._size_label.configure(text=size_text)
                 self._eta_label.configure(text="")
             except Exception:
                 pass
         else:
             try:
-                self._speed_label.configure(text="")
+                self._speed_label.configure(text=f"{percent_text}  •  {self._status_text()}")
+                self._size_label.configure(text=size_text)
                 self._eta_label.configure(text="")
             except Exception:
                 pass
 
-        try:
-            self._size_label.configure(text=f"{format_size(downloaded)} / {format_size(total)}")
-        except Exception:
-            pass
-
+        # Show/hide action buttons based on status
         if self._status in ("DOWNLOADING", "PENDING"):
             try:
                 self._btn_action.configure(text=t("btn.pause"))
@@ -229,6 +237,17 @@ class DownloadCard(ctk.CTkFrame):
         else:
             try:
                 self._btn_action.grid_remove()
+            except Exception:
+                pass
+
+        if self._status in ("DOWNLOADING", "PENDING", "PAUSED", "ERROR"):
+            try:
+                self._btn_cancel.grid()
+            except Exception:
+                pass
+        else:
+            try:
+                self._btn_cancel.grid_remove()
             except Exception:
                 pass
 
@@ -255,6 +274,51 @@ class DownloadCard(ctk.CTkFrame):
                 self._btn_remove_history.grid_remove()
             except Exception:
                 pass
+
+    def recolor(self, mode: str) -> None:
+        tk = theme.tokens_for(mode)
+        self._mode = mode
+        self._tk = tk
+        try:
+            self.configure(fg_color=tk["BG3"], border_color=tk["BORDER"])
+        except Exception:
+            pass
+        try:
+            self._name_label.configure(text_color=tk["FG"])
+        except Exception:
+            pass
+        try:
+            self._status_label.configure(text_color=tk["FG2"])
+        except Exception:
+            pass
+        try:
+            self._progress.recolor(mode)
+        except Exception:
+            pass
+        try:
+            self._speed_label.configure(text_color=tk["FG2"])
+            self._size_label.configure(text_color=tk["FG2"])
+            self._eta_label.configure(text_color=tk["FG2"])
+        except Exception:
+            pass
+        try:
+            self._btn_action.configure(
+                fg_color=tk["ACCENT"], hover_color=tk["ACCENT_H"], text_color=tk["SEL_FG"], border_color=tk["BORDER2"]
+            )
+            self._btn_cancel.configure(
+                fg_color=tk["SEL_BG"], hover_color=tk["SEL_DEEP"], text_color=tk["SEL_FG"], border_color=tk["BORDER2"]
+            )
+            self._btn_folder.configure(
+                fg_color="transparent", hover_color=tk["SEL_DEEP"], text_color=tk["FG"], border_color=tk["BORDER"]
+            )
+            self._btn_run.configure(
+                fg_color="transparent", hover_color=tk["SEL_DEEP"], text_color=tk["FG"], border_color=tk["BORDER"]
+            )
+            self._btn_remove_history.configure(
+                fg_color=tk["SEL_BG"], hover_color=tk["SEL_DEEP"], text_color=tk["SEL_FG"], border_color=tk["BORDER2"]
+            )
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ actions
 
@@ -290,25 +354,25 @@ class DownloadCard(ctk.CTkFrame):
         if path and os.path.exists(path):
             self._api.run_file(path)
 
-    def _delete(self) -> None:
-        # Audit-fix H5: jangan diam-diam lewat kalau dialog error.
+    def _cancel(self) -> None:
+        """Cancel download: stop it, delete parts, and remove from the list."""
         try:
             confirmed = ask_yes_no(
                 self.winfo_toplevel(),
-                title=t("dlg.delete.title", default="Hapus Download?"),
-                message=t("dlg.delete.body",
-                          default=f"Hapus permanen \"{self._filename}\" dan riwayatnya?\n\nTidak bisa dibatalkan."),
-                yes_label=t("btn.delete", default="Hapus"),
+                title=t("dlg.cancel.title", default="Batal Unduhan?"),
+                message=t("dlg.cancel.body",
+                          default=f"Batal \"{self._filename}\"?\n\nFile yang sudah diunduh sebagian akan dihapus."),
                 danger=True,
                 mode=self._mode,
             )
         except Exception as exc:
-            print(f"[DownloadCard] delete-confirm error: {exc}")
+            print(f"[DownloadCard] cancel-confirm error: {exc}")
             return
         if not confirmed:
             return
 
         task_id = self._task_id
+
         def _vanish() -> None:
             try:
                 self.destroy()
@@ -318,14 +382,23 @@ class DownloadCard(ctk.CTkFrame):
             self.master.after(0, _vanish)
         except Exception:
             pass
-        def _do_delete() -> None:
+
+        def _do_cancel() -> None:
             try:
-                result = self._api.delete(task_id, True, True)
-                if isinstance(result, dict) and result.get("error") and self._on_change:
-                    self._on_change()
+                self._api.delete(task_id, delete_parts=True, remove_from_history=False)
             except Exception:
                 pass
-        threading.Thread(target=_do_delete, daemon=True).start()
+            if self._on_change:
+                try:
+                    self._on_change()
+                except Exception:
+                    pass
+
+        threading.Thread(target=_do_cancel, daemon=True).start()
+
+    def _delete(self) -> None:
+        # Kept for backward compatibility; now also acts as cancel.
+        self._cancel()
 
     def _remove_history(self) -> None:
         try:

@@ -19,6 +19,7 @@ memanggil helper yang sama tanpa duplikasi logic.
 import os as _os
 import subprocess as _subprocess
 import sys as _sys
+import time
 
 
 def relaunch_subprocess(argv: list[str] | None = None) -> None:
@@ -61,6 +62,18 @@ def relaunch_subprocess(argv: list[str] | None = None) -> None:
         safe_argv.append(arg)
 
     kwargs: dict = {"close_fds": True}
+    env = _os.environ.copy()
+
+    # PyInstaller frozen bundle: child must inherit TCL/TK library paths so
+    # the Tkinter runtime hook can find _tcl_data/_tk_data inside _MEIPASS.
+    # Do NOT pass PYINSTALLER_MEIPASS; the bootloader will set it fresh.
+    if getattr(_sys, "frozen", False):
+        meipass = getattr(_sys, "_MEIPASS", None)
+        if meipass:
+            env.setdefault("TCL_LIBRARY", _os.path.join(meipass, "tcl"))
+            env.setdefault("TK_LIBRARY", _os.path.join(meipass, "tk"))
+    kwargs["env"] = env
+
     if _os.name == "nt":
         flags = 0
         # DETACHED_PROCESS: child tidak share parent's console window.
@@ -68,6 +81,14 @@ def relaunch_subprocess(argv: list[str] | None = None) -> None:
         # CREATE_NEW_PROCESS_GROUP: kill-group tidak affect parent.
         flags |= getattr(_subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
         kwargs["creationflags"] = flags
+
+    # Beri waktu parent process mulai terminasi sebelum child jalan,
+    # agar _MEI lama bisa dibersihkan dan tidak collision.
+    if getattr(_sys, "frozen", False):
+        try:
+            time.sleep(0.15)
+        except Exception:
+            pass
 
     try:
         _subprocess.Popen(safe_argv, **kwargs)

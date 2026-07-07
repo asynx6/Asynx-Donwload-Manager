@@ -26,8 +26,8 @@ testfile.bin
 
 # IDE/agent tooling caches
 .opencode/
-.openclaude/
 .agents/
+.openclaude/
 
 # PyInstaller output
 dist/

@@ -8,18 +8,23 @@ atau fallback ke frontend/ui/assets/icons/logo.png).
 
 import datetime
 import os
+import threading
+from typing import Callable
 
 import customtkinter as ctk
 from PIL import Image
 
 from frontend.ui import theme
 from frontend.ui.api_client import APIClient
-from frontend.ui.i18n import t
+from frontend.ui.i18n import t, set_language, get_language
 from frontend.ui.windows.home_panel import HomePanel
 from frontend.ui.windows.settings_panel import SettingsPanel
 
 
-_LOCAL_LOGO_CANDIDATE = r"C:\Users\asynx\Downloads\AsynxDL\Logo.png"
+_LOCAL_LOGO_CANDIDATE = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "Logo.png")
+)
+_STATE_HEARTBEAT_INTERVAL_MS = 10_000
 
 
 def _load_logo_image(size: int = 26):
@@ -41,7 +46,7 @@ def _load_logo_image(size: int = 26):
 
 class MainWindow(ctk.CTkFrame):
 
-    def __init__(self, master, api: APIClient, **kwargs):
+    def __init__(self, master, api: APIClient, on_settings_change: Callable | None = None, **kwargs):
         # Determine mode from app config, fall back to "light" for Brutalist W98.
         try:
             from backend.system.config import load_config
@@ -52,13 +57,14 @@ class MainWindow(ctk.CTkFrame):
         except Exception:
             mode = "light"
 
-        super().__init__(master, fg_color=theme.tokens(mode)["BG"], corner_radius=theme.CORNER_NONE, **kwargs)
+        super().__init__(master, fg_color=theme.tokens_for(mode)["BG"], corner_radius=theme.CORNER_NONE, **kwargs)
         self._api = api
         self._mode = mode
+        self._on_settings_change = on_settings_change
         self._settings: dict = {}
         self._make_calls: list = []
 
-        tk = theme.tokens(mode)
+        tk = theme.tokens_for(mode)
         self.configure(fg_color=tk["BG"])
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -133,14 +139,14 @@ class MainWindow(ctk.CTkFrame):
         self._on_tab_click("home")
 
         self.after(60, self._boot_panels)
-        self.after(1500, self._state_heartbeat)
+        self.after(_STATE_HEARTBEAT_INTERVAL_MS, self._state_heartbeat)
 
     # ------------------------------------------------------------------ helpers
 
     def _on_tab_click(self, key: str) -> None:
         if key not in self._tab_buttons:
             return
-        tk = theme.tokens(self._mode)
+        tk = theme.tokens_for(self._mode)
         for k, btn in self._tab_buttons.items():
             if k == key:
                 btn.configure(
@@ -183,6 +189,19 @@ class MainWindow(ctk.CTkFrame):
             self._settings = self._api.get_settings()
         except Exception:
             pass
+        try:
+            self._home_panel.refresh_text(mode=self._settings.get("theme", self._mode))
+        except Exception:
+            pass
+        try:
+            self._settings_panel.refresh_text(mode=self._settings.get("theme", self._mode))
+        except Exception:
+            pass
+        if callable(self._on_settings_change):
+            try:
+                self._on_settings_change(self._settings)
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------ public
 
@@ -225,10 +244,72 @@ class MainWindow(ctk.CTkFrame):
             except Exception:
                 pass
             try:
-                self.after(1500, _beat)
+                self.after(_STATE_HEARTBEAT_INTERVAL_MS, _beat)
             except Exception:
                 return
         try:
             _beat()
         except Exception:
             pass
+
+    def refresh_text(self) -> None:
+        """Apply latest language/theme ke seluruh MainWindow dan child panels."""
+        try:
+            from backend.system.config import load_config
+            cfg = load_config()
+        except Exception:
+            cfg = {}
+        try:
+            lang = cfg.get("language", get_language())
+            set_language(lang)
+        except Exception:
+            pass
+        try:
+            mode = cfg.get("theme", self._mode)
+            if mode not in ("light", "dark"):
+                mode = "light"
+            ctk.set_appearance_mode(mode)
+            theme.set_mode(mode)
+            self._mode = mode
+        except Exception:
+            pass
+        tk = theme.tokens_for(self._mode)
+        try:
+            self.configure(fg_color=tk["BG"])
+        except Exception:
+            pass
+        try:
+            home_btn = self._tab_buttons.get("home")
+            if home_btn is not None:
+                home_btn.configure(text=t("app.tab.home"), text_color=tk["FG"])
+        except Exception:
+            pass
+        try:
+            settings_btn = self._tab_buttons.get("setting")
+            if settings_btn is not None:
+                settings_btn.configure(text=t("app.tab.setting"), text_color=tk["FG"])
+        except Exception:
+            pass
+        try:
+            if self._home_panel is not None:
+                self._home_panel.refresh_text(mode=self._mode)
+        except Exception:
+            pass
+        try:
+            if self._settings_panel is not None:
+                self._settings_panel.refresh_text(mode=self._mode)
+        except Exception:
+            pass
+        try:
+            theme.set_mode(self._mode)
+            theme.repaint(self, mode=self._mode)
+        except Exception:
+            pass
+        # Re-apply active tab styling after global repaint.
+        try:
+            self._on_tab_click(self._current_tab)
+        except Exception:
+            pass
+
+
+__all__: list[str] = ["MainWindow"]

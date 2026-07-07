@@ -1,19 +1,29 @@
 import customtkinter as ctk
 
+from frontend.ui import theme
+
 
 class ProgressBar(ctk.CTkFrame):
-    """Progress bar modern dengan label persentase overlay."""
+    """Brutalist mono-grey progress bar."""
 
-    def __init__(self, master, height=18, *args, **kwargs):
-        super().__init__(master, height=height, fg_color=("#E5E7EB", "#27272A"), corner_radius=height // 2, *args, **kwargs)
+    def __init__(self, master, height=18, mode="light", color=None, *args, **kwargs):
+        tk = theme.tokens_for(mode)
+        super().__init__(
+            master, height=height,
+            fg_color=tk["BG"], corner_radius=theme.CORNER_NONE,
+            *args, **kwargs
+        )
+        self._mode = mode
+        self._tk = tk
         self._progress = ctk.CTkProgressBar(
-            self, height=height, corner_radius=height // 2,
-            fg_color=("#E5E7EB", "#27272A"), progress_color="#6366F1"
+            self, height=height, corner_radius=theme.CORNER_NONE,
+            fg_color=tk["BG"], progress_color=color or tk["PROGRESS"],
+            border_width=1, border_color=tk["BORDER"]
         )
         self._progress.set(0.0)
         self._progress.pack(fill="both", expand=True)
         self._label = ctk.CTkLabel(
-            self, text="0%", font=("Arial", 11, "bold"), text_color="white"
+            self, text="0%", font=theme.font(11, bold=True), text_color=tk["FG"]
         )
         self._label.place(relx=0.5, rely=0.5, anchor="center")
 
@@ -24,3 +34,10 @@ class ProgressBar(ctk.CTkFrame):
 
     def set_color(self, color: str):
         self._progress.configure(progress_color=color)
+
+    def recolor(self, mode: str):
+        tk = theme.tokens_for(mode)
+        self._tk = tk
+        self.configure(fg_color=tk["BG"], border_color=tk["BORDER"])
+        self._progress.configure(fg_color=tk["BG"], progress_color=tk["PROGRESS"], border_color=tk["BORDER"])
+        self._label.configure(text_color=tk["FG"])

@@ -1,36 +1,26 @@
-"""AsynxDL — Restart request dialog (Brutalist W98 mono-grey).
+"""AsynxDL — Restart required info dialog (Brutalist W98 mono-grey).
 
-Kotak Restart Now / Restart Later. Muncul setelah user merubah bahasa atau
-tema lewat Settings (lihat settings_panel._save yang menentukan kapan restart
-diperlukan).
-
-Contoh pakai:
-    choice = ask_restart_choice(parent, title=..., message=..., mode=app_mode)
-    if choice == "now":
-        os.execv(sys.executable, [sys.executable, *sys.argv])
-    elif choice == "later":
-        pass
+Dialog peringatan murni: user diberitahu bahwa perubahan bahasa/tema
+memerlukan restart manual. Tidak ada tombol restart otomatis; hanya
+tombol Close di tengah.
 """
-import os
-import sys
 
 import customtkinter as ctk
 
 from frontend.ui import theme
 from frontend.ui.i18n import t
-from frontend.ui.components._relaunch import relaunch_subprocess  # Phase-H fix
 
 
 def ask_restart_choice(parent, title: str, message: str,
                        mode: str = "light") -> str:
-    """Brutalist 2-button modal — return 'now' or 'later'."""
+    """Tampilkan dialog peringatan restart; return 'later' (tidak auto-restart)."""
     dlg = RestartDialog(parent, title=title, message=message, mode=mode)
     parent.wait_window(dlg)
     return dlg.result
 
 
 class RestartDialog(ctk.CTkToplevel):
-    """Brutalist restart confirmation — square edges, bordered, mono-grey."""
+    """Brutalist restart warning — square edges, bordered, mono-grey."""
 
     def __init__(self, parent, title: str, message: str, mode: str = "light"):
         tk = theme.tokens(mode)
@@ -75,66 +65,34 @@ class RestartDialog(ctk.CTkToplevel):
                     anchor="w", justify="left", wraplength=420).grid(
                         row=1, column=0, sticky="ew", padx=10, pady=(0, 12))
 
-        # Buttons
+        # Single centered Close button
         btn_frame = ctk.CTkFrame(card, fg_color="transparent",
                                 corner_radius=theme.CORNER_NONE)
         btn_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 8))
         btn_frame.grid_columnconfigure(0, weight=1)
-        btn_frame.grid_columnconfigure(1, weight=1)
 
-        # Restart Later — secondary
         ctk.CTkButton(
             btn_frame, text=t("btn.close", default="Close"),
             width=180, height=theme.BUTTON_HEIGHT,
             corner_radius=theme.CORNER_NONE, font=theme.font(11, bold=True),
-            fg_color="transparent", hover_color=tk["SEL_DEEP"],
-            text_color=tk["FG"], border_width=1, border_color=tk["BORDER"],
-            command=self._on_later,
-        ).grid(row=0, column=0, sticky="w", padx=(0, 8))
-
-        # Restart Now — primary Brutalist accent
-        ctk.CTkButton(
-            btn_frame, text=t("btn.restart_now", default="Restart Now"),
-            width=180, height=theme.BUTTON_HEIGHT,
-            corner_radius=theme.CORNER_NONE, font=theme.font(11, bold=True),
             fg_color=tk["ACCENT"], hover_color=tk["ACCENT_H"],
             text_color=tk["SEL_FG"], border_width=1, border_color=tk["BORDER2"],
-            command=self._on_now,
-        ).grid(row=0, column=1, sticky="e", padx=(8, 0))
+            command=self._on_close,
+        ).grid(row=0, column=0)
 
         # Keyboard
-        self.bind("<Return>", lambda _e: self._on_now())
-        self.bind("<Escape>", lambda _e: self._on_later())
-        self.protocol("WM_DELETE_WINDOW", self._on_later)
+        self.bind("<Return>", lambda _e: self._on_close())
+        self.bind("<Escape>", lambda _e: self._on_close())
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(50, lambda: self.focus_force())
 
-    def _on_now(self) -> None:
-        self.result = "now"
-        try:
-            self.grab_release()
-        except Exception:
-            pass
-        self._restart_now()
-
-    def _on_later(self) -> None:
+    def _on_close(self) -> None:
         self.result = "later"
         try:
             self.grab_release()
         except Exception:
             pass
         self.destroy()
-
-    def _restart_now(self) -> None:
-        """Re-launch interpreter (dev mode) atau AsynxDL.exe (bundle mode).
-
-        Phase-H fix: ``os.execv`` di Windows + PyInstaller = broken (orphan
-        ``_MEI*`` + ``FileNotFoundError: base_library.zip``). Pakai
-        ``subprocess.Popen`` untuk spawn process baru + ``os._exit`` untuk
-        terminate parent. Bundle runtime hook ``runtime_hook_meipass.py``
-        membersihkan ``_MEI*`` orphan di tmp sebelum bootloader extract.
-        """
-        self.destroy()
-        relaunch_subprocess()
 
 
 __all__ = ["ask_restart_choice", "RestartDialog"]  # noqa

@@ -27,17 +27,36 @@ class DownloadManager:
 
     def __init__(self, queue_dir: str = "data/queue"):
         self._queue_dir = os.path.expandvars(os.path.expanduser(queue_dir))
-        self._meta_mgr = MetadataManager(queue_dir)
+        self._meta_mgr = MetadataManager(self._queue_dir)
         self._active: dict[str, DownloadTask] = {}
         self._lock = threading.Lock()
         self._progress_callback: Optional[Callable[[dict], None]] = None
-        self._max_concurrent = load_config().get("max_concurrent_downloads", 3)
+        self._completed_count_cache = 0
+        self._completed_count_cache_at = 0.0
+        config = load_config()
+        self._max_concurrent = config.get("max_concurrent_downloads", 3)
+        from backend.core.download_scheduler import get_scheduler
+        get_scheduler().set_global_limit(config.get("speed_limit_kbps", 0))
 
     def set_progress_callback(self, callback: Optional[Callable[[dict], None]]):
         self._progress_callback = callback
 
     def set_max_concurrent(self, value: int):
         self._max_concurrent = max(1, min(value, 5))
+
+    def update_global_speed_limit(self, limit_kbps: int):
+        from backend.core.download_scheduler import get_scheduler
+        get_scheduler().set_global_limit(limit_kbps)
+        self._apply_scheduler_limits()
+
+    def _apply_scheduler_limits(self):
+        from backend.core.download_scheduler import get_scheduler
+        scheduler = get_scheduler()
+        with self._lock:
+            for task_id, t in self._active.items():
+                if t.status == "DOWNLOADING":
+                    limit = scheduler.limit_for_task(task_id)
+                    t.set_speed_limit(limit)
 
     def _broadcast(self, task: DownloadTask, info: dict):
         if self._progress_callback:
@@ -54,60 +73,79 @@ class DownloadManager:
         speed_limit_kbps: int = 0,
     ) -> dict:
         """Tambah download baru ke queue dan mulai download."""
-        # Cek duplikat URL yang masih aktif
-        with self._lock:
-            for task_id, task in self._active.items():
-                if task.url == url and task.status in ("PENDING", "DOWNLOADING", "PAUSED"):
-                    return {"error": "URL already in queue", "id": task_id}
+        try:
+            # Validasi URL scheme (http dan https saja)
+            try:
+                parsed = urlparse(url)
+                if parsed.scheme.lower() not in ("http", "https"):
+                    return {"error": "Only HTTP and HTTPS protocols are supported"}
+            except Exception:
+                return {"error": "Invalid URL format"}
 
-        # Jika max concurrent tercapai, buat metadata PENDING tapi belum mulai
-        config = load_config()
-        max_concurrent = self._max_concurrent
-        active_count = sum(
-            1 for t in self._active.values() if t.status == "DOWNLOADING"
-        )
+            # Cek duplikat URL yang masih aktif
+            with self._lock:
+                for task_id, task in self._active.items():
+                    if task.url == url and task.status in ("PENDING", "DOWNLOADING", "PAUSED"):
+                        return {"error": "URL already in queue", "id": task_id}
 
-        if save_path:
-            save_path = os.path.expandvars(os.path.expanduser(save_path))
-        else:
-            save_path = os.path.expandvars(
-                os.path.expanduser(config.get("default_download_path", "%USERPROFILE%\\Downloads"))
+            config = load_config()
+            if save_path:
+                save_path = os.path.expandvars(os.path.expanduser(save_path))
+            else:
+                save_path = os.path.expandvars(
+                    os.path.expanduser(config.get("default_download_path", "%USERPROFILE%\\Downloads"))
+                )
+            max_threads = max(1, min(config.get("max_threads_per_download", 8), 8))
+            limit = speed_limit_kbps if speed_limit_kbps else config.get("speed_limit_kbps", 0)
+
+            # Jika slot concurrent penuh, tetap buat metadata PENDING;
+            # _try_start_pending akan menjalankannya begitu slot kosong.
+            max_concurrent = max(1, self._max_concurrent)
+            active_downloading = sum(
+                1 for t in self._active.values() if t.status == "DOWNLOADING"
             )
+            queued = active_downloading >= max_concurrent
 
-        max_threads = max(1, min(config.get("max_threads_per_download", 8), 8))
-        limit = speed_limit_kbps if speed_limit_kbps else config.get("speed_limit_kbps", 0)
+            task = DownloadTask(
+                url=url,
+                save_path=save_path,
+                filename=filename,
+                speed_limit_kbps=limit,
+                max_threads=max_threads,
+                queue_dir=self._queue_dir,
+                on_progress=self._broadcast,
+            )
+            # Kalau queued, jangan langsung start meskipun _try_start_pending dipanggil.
+            task._queued = queued
 
-        task = DownloadTask(
-            url=url,
-            save_path=save_path,
-            filename=filename,
-            speed_limit_kbps=limit,
-            max_threads=max_threads,
-            queue_dir=self._queue_dir,
-            on_progress=self._broadcast,
-        )
+            # Resolve filename deterministik sebelum metadata create.
+            display_filename = resolve_filename(filename, "", url)
+            full_save_path = os.path.join(save_path, display_filename) if display_filename else ""
 
-        # Buat metadata PENDING terlebih dahulu agar task_id tersedia
-        # Gunakan resolve_filename() deterministik untuk fix bug 'A' di UI.
-        display_filename = resolve_filename(filename, "", url)
-        task._meta_mgr.create(
-            url=url,
-            filename=display_filename,
-            save_path=os.path.join(save_path, display_filename) if display_filename else "",
-            total_size=0,
-            thread_count=max_threads,
-            speed_limit_kbps=limit,
-            graceful_exit=True,
-            task_id=task.task_id,
-        )
-        task._status = "PENDING"
+            try:
+                self._meta_mgr.create(
+                    url=url,
+                    filename=display_filename,
+                    save_path=full_save_path,
+                    total_size=0,
+                    thread_count=max_threads,
+                    speed_limit_kbps=limit,
+                    graceful_exit=True,
+                    task_id=task.task_id,
+                )
+                task._status = "PENDING"
+            except Exception as exc:
+                print(f"[DownloadManager] metadata create failed: {exc}")
+                task._status = "ERROR"
 
-        with self._lock:
-            self._active[task.task_id] = task
+            with self._lock:
+                self._active[task.task_id] = task
 
-        self._try_start_pending()
-
-        return self._task_info(task)
+            self._try_start_pending()
+            return self._task_info(task)
+        except Exception as exc:
+            print(f"[DownloadManager] start_new fatal: {exc}")
+            return {"error": str(exc)}
 
     def _task_info(self, task: DownloadTask) -> dict:
         info = task._progress_dict() if hasattr(task, "_progress_dict") else {
@@ -135,29 +173,57 @@ class DownloadManager:
                         info[key] = meta[key]
         return info
 
-    def _try_start_pending(self):
-        """Mulai task PENDING jika masih ada slot concurrent."""
+    def _try_start_pending(self) -> bool:
+        """Mulai task PENDING jika masih ada slot concurrent.
+
+        Menggunakan Shortest-Job-First (SJF) ordering: task dengan total_size
+        terkecil didahulukan, lalu task yang sudah lama pending (created_at).
+
+        Returns:
+            True jika sebuah task berhasil di-start, False jika tidak.
+        """
         with self._lock:
             active_count = sum(
                 1 for t in self._active.values() if t.status == "DOWNLOADING"
             )
             if active_count >= self._max_concurrent:
-                return
+                return False
             pending = [
                 t for t in self._active.values()
                 if t.status == "PENDING" and t.task_id
             ]
             if not pending:
-                return
+                return False
+
+            # SJF: urutkan berdasarkan total_size (kecil dulu), tie-break created_at.
+            def _sort_key(t):
+                meta = self._meta_mgr.load(t.task_id) or {}
+                size = meta.get("total_size", 0) or 0
+                created = meta.get("created_at", "")
+                # task yang tidak di-queued diutamakan sedikit
+                queued = 1 if getattr(t, "_queued", False) else 0
+                return (queued, size, created)
+
+            pending.sort(key=_sort_key)
             task = pending[0]
+            task._queued = False
 
         def run_task():
             try:
+                from backend.core.download_scheduler import get_scheduler
+                meta = self._meta_mgr.load(task.task_id) or {}
+                priority = meta.get("priority", 5)
+                get_scheduler().register_task(task.task_id, priority=priority)
+                self._apply_scheduler_limits()
                 task.start()
             finally:
+                from backend.core.download_scheduler import get_scheduler
+                get_scheduler().unregister_task(task.task_id)
+                self._apply_scheduler_limits()
                 self._try_start_pending()
 
         threading.Thread(target=run_task, daemon=True).start()
+        return True
 
     def get_all(self) -> list[dict]:
         """List semua task aktif + metadata queue."""
@@ -209,6 +275,9 @@ class DownloadManager:
             task = self._active.get(task_id)
         if task:
             task.pause()
+            from backend.core.download_scheduler import get_scheduler
+            get_scheduler().unregister_task(task_id)
+            self._apply_scheduler_limits()
             return self._task_info(task)
         # 404 fix: kalau sudah COMPLETED, kembalikan info saja tanpa error
         meta = self._meta_mgr.load(task_id)
@@ -226,8 +295,16 @@ class DownloadManager:
             if task.status in ("PAUSED", "ERROR"):
                 def run_task():
                     try:
+                        from backend.core.download_scheduler import get_scheduler
+                        meta = self._meta_mgr.load(task_id) or {}
+                        priority = meta.get("priority", 5)
+                        get_scheduler().register_task(task_id, priority=priority)
+                        self._apply_scheduler_limits()
                         task.resume()
                     finally:
+                        from backend.core.download_scheduler import get_scheduler
+                        get_scheduler().unregister_task(task_id)
+                        self._apply_scheduler_limits()
                         self._try_start_pending()
                 threading.Thread(target=run_task, daemon=True).start()
             return self._task_info(task)
@@ -249,7 +326,20 @@ class DownloadManager:
             task._downloaded_size = meta.get("downloaded_size", 0)
             with self._lock:
                 self._active[task_id] = task
-            threading.Thread(target=task.resume, daemon=True).start()
+
+            def run_task():
+                try:
+                    from backend.core.download_scheduler import get_scheduler
+                    priority = meta.get("priority", 5)
+                    get_scheduler().register_task(task_id, priority=priority)
+                    self._apply_scheduler_limits()
+                    task.resume()
+                finally:
+                    from backend.core.download_scheduler import get_scheduler
+                    get_scheduler().unregister_task(task_id)
+                    self._apply_scheduler_limits()
+                    self._try_start_pending()
+            threading.Thread(target=run_task, daemon=True).start()
             return self._task_info(task)
         completed_meta = self._completed_load(task_id)
         if completed_meta:
@@ -276,6 +366,9 @@ class DownloadManager:
             task = self._active.pop(task_id, None)
         if task:
             task.cancel()
+            from backend.core.download_scheduler import get_scheduler
+            get_scheduler().unregister_task(task_id)
+            self._apply_scheduler_limits()
             # Bug-1 fix: extract metadata BEFORE deleting file supaya kita
             # bisa dapat parts_dir + chunks untuk membersihkan part files di
             # lokasi yang benar (bukan default AsynxDL/.parts).
@@ -419,6 +512,59 @@ class DownloadManager:
             else:
                 break
         return started
+
+    def get_metrics(self) -> dict:
+        """Export ringkasan metrics download."""
+        import shutil
+        active_count = len(self._active)
+        downloading_count = 0
+        paused_count = 0
+        pending_count = 0
+        failed_count = 0
+        total_speed_kbps = 0.0
+        
+        with self._lock:
+            for task in self._active.values():
+                if task.status == "DOWNLOADING":
+                    downloading_count += 1
+                    total_speed_kbps += getattr(task, "_speed_kbps", 0.0)
+                elif task.status == "PAUSED":
+                    paused_count += 1
+                elif task.status == "PENDING":
+                    pending_count += 1
+                elif task.status == "ERROR":
+                    failed_count += 1
+
+        now = time.monotonic()
+        completed_count = self._completed_count_cache
+        if now - self._completed_count_cache_at > 30.0:
+            try:
+                completed_count = len(self._meta_mgr.list_history())
+                self._completed_count_cache = completed_count
+                self._completed_count_cache_at = now
+            except Exception:
+                pass
+
+        config = load_config()
+        save_path = config.get("default_download_path", "%USERPROFILE%\\Downloads")
+        save_path = os.path.expandvars(os.path.expanduser(save_path))
+        free_space_bytes = 0
+        try:
+            drive = os.path.splitdrive(save_path)[0] or os.path.sep
+            free_space_bytes = shutil.disk_usage(drive).free
+        except Exception:
+            pass
+
+        return {
+            "active_tasks": active_count,
+            "downloading_tasks": downloading_count,
+            "paused_tasks": paused_count,
+            "pending_tasks": pending_count,
+            "failed_tasks": failed_count,
+            "completed_tasks": completed_count,
+            "total_speed_kbps": round(total_speed_kbps, 1),
+            "free_space_bytes": free_space_bytes,
+        }
 
     def pause_all(self):
         with self._lock:

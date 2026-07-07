@@ -44,6 +44,10 @@ def set_language(lang: str):
     _i18n.load(lang)
 
 
+def get_language() -> str:
+    return _i18n._lang
+
+
 def t(key: str, default: str = "", **kwargs) -> str:
     val = _i18n.t(key, **kwargs)
     if val == key and default:

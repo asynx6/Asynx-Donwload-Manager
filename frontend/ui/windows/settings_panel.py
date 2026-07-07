@@ -18,14 +18,14 @@ from frontend.ui.i18n import t, set_language
 class SettingsPanel(ctk.CTkFrame):
 
     def __init__(self, master, mode: str = "light", **kw):
-        super().__init__(master, fg_color=theme.tokens(mode)["BG2"], corner_radius=theme.CORNER_NONE, **kw)
+        super().__init__(master, fg_color=theme.tokens_for(mode)["BG2"], corner_radius=theme.CORNER_NONE, **kw)
         self._mode = mode
         self._api: APIClient | None = None
         self._on_save: Callable | None = None
         self._config: dict = {}
         self._widgets_by_row: list = []
 
-        tk = theme.tokens(mode)
+        tk = theme.tokens_for(mode)
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
@@ -34,10 +34,11 @@ class SettingsPanel(ctk.CTkFrame):
         self._frame.grid_columnconfigure(0, weight=1)
 
         # header
-        ctk.CTkLabel(
+        self._header_label = ctk.CTkLabel(
             self._frame, text=t("settings.title"),
             font=theme.font(14, bold=True), text_color=tk["FG"]
-        ).grid(row=0, column=0, sticky="w", pady=(0, 12))
+        )
+        self._header_label.grid(row=0, column=0, sticky="w", pady=(0, 12))
 
         self._build_fields()
         self._footer()
@@ -60,14 +61,14 @@ class SettingsPanel(ctk.CTkFrame):
     # ------------------------------------------------------------------ UI build
 
     def _add_section_label(self, row: int, text: str) -> None:
-        tk = theme.tokens(self._mode)
+        tk = theme.tokens_for(self._mode)
         ctk.CTkLabel(
             self._frame, text=text, font=theme.font(12, bold=True),
             text_color=tk["FG2"]
         ).grid(row=row, column=0, sticky="w", pady=(12, 4))
 
     def _add_form_row(self, row: int, key: str, kind: str, **opt) -> int:
-        tk = theme.tokens(self._mode)
+        tk = theme.tokens_for(self._mode)
         wrap = ctk.CTkFrame(self._frame, fg_color=tk["BG3"], corner_radius=theme.CORNER_NONE,
                             border_width=1, border_color=tk["BORDER"])
         wrap.grid(row=row, column=0, sticky="ew", pady=(0, 8))
@@ -165,18 +166,6 @@ class SettingsPanel(ctk.CTkFrame):
         row = self._add_form_row(row, "speed_limit_kbps", "int",
                                   label=t("settings.speed_limit"),
                                   placeholder="0")
-        # Max threads
-        self._add_section_label(row, t("settings.max_threads"))
-        row += 1
-        row = self._add_form_row(row, "max_threads_per_download", "slider",
-                                  label=t("settings.max_threads"),
-                                  from_=1, to=32, steps=31)
-        # Max concurrent
-        self._add_section_label(row, t("settings.max_concurrent"))
-        row += 1
-        row = self._add_form_row(row, "max_concurrent_downloads", "int",
-                                  label=t("settings.max_concurrent"),
-                                  placeholder="3")
         # Language
         self._add_section_label(row, t("settings.language"))
         row += 1
@@ -195,9 +184,16 @@ class SettingsPanel(ctk.CTkFrame):
         row = self._add_form_row(row, "run_on_startup", "check",
                                   label=t("settings.run_startup"))
         self._end_row = row
+        self._section_keys = [
+            (1, "settings.default_path"),
+            (3, "settings.speed_limit"),
+            (5, "settings.language"),
+            (7, "settings.theme"),
+            (9, "settings.run_startup"),
+        ]
 
     def _footer(self) -> None:
-        tk = theme.tokens(self._mode)
+        tk = theme.tokens_for(self._mode)
         # pins beneath the scrollable _frame.
         footer = ctk.CTkFrame(self, fg_color=tk["BG2"], corner_radius=theme.CORNER_NONE)
         footer.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 14))
@@ -218,6 +214,44 @@ class SettingsPanel(ctk.CTkFrame):
             command=self._save,
         )
         self._btn_save.grid(row=0, column=1)
+
+    def refresh_text(self, mode: str | None = None) -> None:
+        """Update semua label statis setelah language/theme berubah."""
+        if mode is not None:
+            self._mode = mode
+        theme.set_mode(self._mode)
+        tk = theme.tokens_for(self._mode)
+        self.configure(fg_color=tk["BG2"])
+        try:
+            self._frame.configure(fg_color=tk["BG2"])
+        except Exception:
+            pass
+        try:
+            self._header_label.configure(text=t("settings.title"), text_color=tk["FG"])
+        except Exception:
+            pass
+        try:
+            self._btn_save.configure(text=t("btn.save"), fg_color=tk["ACCENT"],
+                                     hover_color=tk["ACCENT_H"], text_color=tk["SEL_FG"],
+                                     border_color=tk["BORDER2"])
+        except Exception:
+            pass
+        try:
+            self._lbl_status.configure(text=t("settings.saved_hint"), text_color=tk["FG2"])
+        except Exception:
+            pass
+        for row, key in getattr(self, "_section_keys", []):
+            children = self._frame.grid_slaves(row=row, column=0)
+            for child in children:
+                try:
+                    if isinstance(child, ctk.CTkLabel):
+                        child.configure(text=t(key), text_color=tk["FG2"])
+                except Exception:
+                    pass
+        try:
+            theme.repaint(self, mode=self._mode)
+        except Exception:
+            pass
 
     def _browse_path(self) -> None:
         path = filedialog.askdirectory()
@@ -252,23 +286,18 @@ class SettingsPanel(ctk.CTkFrame):
         except Exception:
             pass
         try:
-            self._w_max_threads_per_download.set(self._config.get("max_threads_per_download", 8))
-            if hasattr(self, "_slider_label"):
-                self._slider_label.configure(text=str(int(self._w_max_threads_per_download.get())))
-        except Exception:
-            pass
-        try:
-            self._w_max_concurrent_downloads.delete(0, "end")
-            self._w_max_concurrent_downloads.insert(0, str(self._config.get("max_concurrent_downloads", 3)))
-        except Exception:
-            pass
-        try:
             self._w_language.set(self._config.get("language", "en"))
         except Exception:
             pass
         theme_val = self._config.get("theme", "dark")
+        # Gunakan mapping label agar perubahan bahasa tidak merusak deteksi theme.
+        self._theme_label_map = {
+            t("settings.light"): "light",
+            t("settings.dark"): "dark",
+        }
+        self._theme_value_map = {v: k for k, v in self._theme_label_map.items()}
         try:
-            self._w_theme_label.set(t("settings.light") if theme_val == "light" else t("settings.dark"))
+            self._w_theme_label.set(self._theme_value_map.get(theme_val, t("settings.dark")))
         except Exception:
             pass
         try:
@@ -294,21 +323,11 @@ class SettingsPanel(ctk.CTkFrame):
         except Exception:
             speed = 0
         try:
-            concurrent = int(self._w_max_concurrent_downloads.get() or 3)
-        except ValueError:
-            concurrent = 3
-        except Exception:
-            concurrent = 3
-        try:
-            threads = int(self._w_max_threads_per_download.get())
-        except Exception:
-            threads = 8
-        try:
             lang = self._w_language.get()
         except Exception:
             lang = "en"
         try:
-            theme_val = "light" if self._w_theme_label.get() == t("settings.light") else "dark"
+            theme_val = self._theme_label_map.get(self._w_theme_label.get(), "dark")
         except Exception:
             theme_val = "dark"
         try:
@@ -318,68 +337,51 @@ class SettingsPanel(ctk.CTkFrame):
         settings = {
             "default_download_path": self._w_default_download_path.get(),
             "speed_limit_kbps": speed,
-            "max_threads_per_download": threads,
-            "max_concurrent_downloads": concurrent,
             "language": lang,
             "theme": theme_val,
             "run_on_startup": startup,
         }
-        # Apply in-process tapi live-redraw belum reliable untuk Brutalist,
-        # sehingga perubahan language/theme akan men-trigger restart dialog
-        # (lihat bawah).
+        # Persist ke backend/config.json. Jika gagal, jangan tampilkan dialog
+        # restart karena perubahan belum tersimpan.
+        saved = False
+        try:
+            resp = self._api.put_settings(settings)
+            if isinstance(resp, dict) and "error" not in resp:
+                saved = True
+                self._config = resp
+            else:
+                print(f"[SettingsPanel] save failed: {resp}")
+        except Exception as exc:
+            print(f"[SettingsPanel] save failed: {exc}")
+
+        if saved:
+            try:
+                self._lbl_status.configure(text=t("settings.saved_hint_ok"))
+            except Exception:
+                pass
+        else:
+            try:
+                self._lbl_status.configure(text=t("settings.saved_hint_error", default="Save failed"))
+            except Exception:
+                pass
+            return  # batalkan, jangan tampilkan restart dialog
+
+        # Apply in-process language/theme.
         try:
             set_language(lang)
             ctk.set_appearance_mode(theme_val)
+            theme.set_mode(theme_val)
             self._mode = theme_val
         except Exception:
             pass
-        try:
-            self._lbl_status.configure(text=t("settings.saved_hint_ok"))
-        except Exception:
-            pass
-        # Track language + theme change untuk restart dialog.
-        try:
-            self._prev_lang = lang
-        except Exception:
-            pass
-        try:
-            self._prev_theme = theme_val
-        except Exception:
-            pass
+
+        # Refresh panel ini dan beritahu MainWindow supaya HomePanel juga refresh.
+        self.refresh_text(mode=theme_val)
         if callable(self._on_save):
             try:
                 self._on_save()
             except Exception:
                 pass
-
-        # Tampilkan restart dialog kalau language ATAU theme berubah dari
-        # nilai awal yang dimuat saat `_load()`. User bisa pilih Restart Now
-        # (auto-relaunch via os.execv) atau Restart Later (no-op, default).
-        try:
-            prev_lang = getattr(self, "_prev_lang_loaded", None)
-            prev_theme = getattr(self, "_prev_theme_loaded", None)
-            lang_changed = (prev_lang is not None and prev_lang != lang)
-            theme_changed = (prev_theme is not None and prev_theme != theme_val)
-        except Exception:
-            lang_changed = theme_changed = False
-        if lang_changed or theme_changed:
-            try:
-                from frontend.ui.components.restart_dialog import ask_restart_choice
-                choice = ask_restart_choice(
-                    self,
-                    title=t("dialogs.restart.title",
-                            default="Restart Required"),
-                    message=t("dialogs.restart.body",
-                              default="Some changes require a restart to fully apply."),
-                    mode=self._mode,
-                )
-                if choice == "now":
-                    from frontend.ui.components._relaunch import (
-                        relaunch_subprocess,
-                    )
-                    relaunch_subprocess()
-            except Exception as exc:
-                print(f"[SettingsPanel] restart dialog failed: {exc}")
 
         # Update baseline after save so subsequent saves compare to latest.
         try:

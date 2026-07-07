@@ -24,7 +24,6 @@
     "browse": "Telusuri",
     "save": "Simpan",
     "close": "Tutup",
-    "start": "Mulai Unduh",
     "continue": "Lanjutkan",
     "remove_history": "Hapus Riwayat",
     "restart_now": "Mulai Ulang Sekarang",
@@ -75,21 +74,15 @@
     "title": "Pengaturan",
     "default_path": "Folder Unduhan Default",
     "speed_limit": "Batas Kecepatan",
-    "max_threads": "Maks Thread per Unduhan",
-    "max_concurrent": "Maks Unduhan Bersamaan",
     "language": "Bahasa",
     "theme": "Tema",
     "run_startup": "Jalankan saat Windows Mulai",
     "light": "Terang",
     "dark": "Gelap",
-    "saved_hint": "Pengaturan disimpan. Beberapa perubahan butuh restart.",
+    "saved_hint": "Pengaturan disimpan.",
     "saved_hint_ok": "Tersimpan."
   },
   "dialogs": {
-    "restart": {
-      "title": "Restart Diperlukan",
-      "body": "Perubahan bahasa atau tema butuh restart untuk diterapkan penuh. Restart sekarang atau nanti?"
-    },
     "delete": {
       "title": "Hapus Unduhan?",
       "body": "Aksi ini akan menghapus unduhan dan semua file bagian-nya. Lanjutkan?"
@@ -97,6 +90,10 @@
     "pause": {
       "title": "Jeda Unduhan?",
       "body": "Jeda unduhan ini? Data yang ada tetap aman dan bisa dilanjutkan."
+    },
+    "cancel": {
+      "title": "Batal Unduhan?",
+      "body": "Batalkan unduhan ini? File bagian yang sudah diunduh akan dihapus."
     },
     "remove_history": {
       "title": "Hapus dari Riwayat?",

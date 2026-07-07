@@ -74,21 +74,15 @@
     "title": "Settings",
     "default_path": "Default Download Path",
     "speed_limit": "Speed Limit",
-    "max_threads": "Max Threads per Download",
-    "max_concurrent": "Max Concurrent Downloads",
     "language": "Language",
     "theme": "Theme",
     "run_startup": "Run on Windows Startup",
     "light": "Light",
     "dark": "Dark",
-    "saved_hint": "Settings saved. Some changes require a restart.",
+    "saved_hint": "Settings saved.",
     "saved_hint_ok": "Saved."
   },
   "dialogs": {
-    "restart": {
-      "title": "Restart Required",
-      "body": "Language or theme change requires a restart to fully apply. Restart now or later?"
-    },
     "delete": {
       "title": "Delete Download?",
       "body": "This will remove the download and all its part files. Continue?"

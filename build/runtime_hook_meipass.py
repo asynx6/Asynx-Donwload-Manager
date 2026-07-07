@@ -5,99 +5,102 @@ Context
 -------
 Setiap kali ``AsynxDL.exe`` jalan, bootloader membuat tmp directory
 bernama ``_MEI<hash>`` di ``%TEMP%`` (Windows) atau ``/tmp`` dan extract
-bundle di situ. Setelah ``os.execv(sys.executable, ...)`` (Restart Now
-di RestartDialog, kasus Windows yang paling sering), 1 proses python
-berganti menjadi 1 proses ``AsynxDL.exe`` baru. Bootloader baru akan
-membuat hash baru — NAMUN Windows tempfile / OS kadang menghasilkan
-hash yang sama (``_MEI113562`` diulang setelah pemakaian sebelumnya),
-lalu bootloader gagal extract karena salah menunjuk dir half-baked
-yang masih ada di tmp:
+bundle di situ. Setelah restart (subprocess.Popen dari RestartDialog,
+kasus Windows yang paling sering), proses baru kadang collision dengan
+``_MEI*`` lama yang masih lock/terbuka sehingga bootloader gagal extract:
 
     FileNotFoundError: [Errno 2] No such file or directory:
         'C:\\Users\\asynx\\AppData\\Local\\Temp\\_MEI113562\\base_library.zip'
 
 Solusi
 ------
-Runtime hook ini berjalan __sebelum__ bootloader extract. Ia menghapus
-orphan ``_MEI*`` dir yang __bukan__ dir process ini sendiri
-(``sys._MEIPASS``) dan __bukan__ barusan di-create (heuristic:
-modified dalam 2 detik terakhir).
+Runtime hook ini berjalan __sebelum__ user code. Ia menghapus orphan
+``_MEI*`` dir yang bukan dir process ini sendiri (``sys._MEIPASS``) dan
+bukan yang baru dibuat oleh bootloader saat ini. Untuk dir yang locked,
+dicoba rename dulu ke ``_MEI<hash>.old.<pid>`` lalu dihapus.
 
-Idempoten + best-effort. Tidak menghapus tmp dir proses ini sendiri.
-Hanya fokus di Windows (di mana ``_MEI*`` namespace dipakai).
+Idempoten + best-effort. Fokus di Windows (di mana ``_MEI*`` dipakai).
 """
 import os
 import sys
 import time
+import shutil
 
 
 def _is_windows() -> bool:
     return sys.platform == "win32"
 
 
-def _meipass_is_alive(path: str, now: float) -> bool:
-    """Return True kalau directory di-create dalam 2 detik terakhir.
-
-    Heuristic untuk membedakan ``_MEI*`` yang baru di-create oleh
-    bootloader (jangan dihapus) vs orphan lama (boleh dihapus).
-
-    Catatan: ``os.path.getmtime`` mengembalikan wall-time seconds
-    (Unix epoch), bukan monotonic. Maka ``now`` HARUS wall-time juga
-    (``time.time()``), bukan ``time.monotonic()``.
-    """
+def _is_meipass_alive(path: str, now: float) -> bool:
+    """Return True kalau directory di-create dalam 2 detik terakhir."""
     try:
         mtime = os.path.getmtime(path)
     except OSError:
         return False
-    return (now - mtime) < 2.0  # grace window 2 detik
+    return (now - mtime) < 2.0
+
+
+def _try_remove(path: str) -> bool:
+    """Hapus directory. Jika locked, coba rename dulu ke *.old.<pid>."""
+    try:
+        shutil.rmtree(path, ignore_errors=True)
+        if not os.path.exists(path):
+            return True
+    except Exception:
+        pass
+
+    try:
+        parent = os.path.dirname(path)
+        name = os.path.basename(path)
+        new_name = f"{name}.old.{os.getpid()}.{int(time.time())}"
+        new_path = os.path.join(parent, new_name)
+        os.rename(path, new_path)
+        shutil.rmtree(new_path, ignore_errors=True)
+        return not os.path.exists(new_path)
+    except Exception:
+        return False
 
 
 def _wipe_stale_meipass(temp_dir: str) -> int:
-    """Hapus orphan ``_MEI*`` dirs di ``temp_dir``.
-
-    Returns jumlah directories yang dihapus (best-effort, swallow
-    semua ``OSError`` individual).
-    """
+    """Hapus orphan ``_MEI*`` dirs di ``temp_dir``."""
     removed = 0
     try:
         entries = os.listdir(temp_dir)
     except OSError:
         return 0
     meipass_self = getattr(sys, "_MEIPASS", None)
-    now = time.time()  # wall-time, matching os.path.getmtime output
+    now = time.time()
     for name in entries:
         if not (name.startswith("_MEI") or name.startswith("_MEI_")):
             continue
         full = os.path.join(temp_dir, name)
         if not os.path.isdir(full):
             continue
-        # Jangan hapus tmp dir process ini sendiri.
         if meipass_self and os.path.normpath(full) == os.path.normpath(meipass_self):
             continue
-        # Jangan hapus yang baru di-create (mungkin bootloader running).
-        if _meipass_is_alive(full, now):
+        if _is_meipass_alive(full, now):
             continue
-        try:
-            # Recursive remove. Best-effort; kalo gagal karena lock,
-            # skip saja.
-            import shutil
-            shutil.rmtree(full, ignore_errors=True)
+        if _try_remove(full):
             removed += 1
-        except Exception:
-            pass
     return removed
 
 
 def main() -> None:
-    """Entrypoint runtime hook."""
     if not _is_windows():
         return
-    # Skip di dev mode (tidak frozen) — orphan tidak terjadi.
     if not getattr(sys, "frozen", False):
         return
     temp_dir = os.environ.get("TEMP") or os.environ.get("TMP")
     if not temp_dir or not os.path.isdir(temp_dir):
         return
+
+    # Jika ini adalah child process hasil restart, beri waktu parent
+    # lama selesai/ter-terminate agar _MEI lama bisa dibersihkan.
+    if os.environ.get("ASYNXDL_RESTART_CHILD"):
+        time.sleep(0.25)
+    else:
+        os.environ["ASYNXDL_RESTART_CHILD"] = "1"
+
     try:
         _wipe_stale_meipass(temp_dir)
     except Exception:

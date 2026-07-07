@@ -141,7 +141,12 @@ class MetadataManager:
                speed_limit_kbps: int = 0,
                graceful_exit: bool = False,
                task_id: str | None = None,
-               parts_dir: str | None = None) -> dict:
+               parts_dir: str | None = None,
+               expected_sha256: str | None = None,
+               expected_md5: str | None = None,
+               etag: str | None = None,
+               fallback_urls: list[str] | None = None,
+               throttle_detected: bool = False) -> dict:
         """Buat metadata baru untuk download task.
 
         Args:
@@ -154,6 +159,11 @@ class MetadataManager:
             graceful_exit: Flag exit (default False saat dibuat).
             task_id: Optional task ID (dibuat baru jika tidak diberikan).
             parts_dir: Optional directory for temporary .part files.
+            expected_sha256: Expected SHA-256 checksum from server Digest header.
+            expected_md5: Expected MD5 checksum from server Digest header.
+            etag: ETag header for final verification.
+            fallback_urls: List of fallback mirror URLs for failover.
+            throttle_detected: Flag indicating throttle was detected.
 
         Returns:
             Dict metadata lengkap yang sudah disimpan.
@@ -195,6 +205,15 @@ class MetadataManager:
         }
         if parts_dir:
             metadata["parts_dir"] = parts_dir
+        if expected_sha256:
+            metadata["expected_sha256"] = expected_sha256
+        if expected_md5:
+            metadata["expected_md5"] = expected_md5
+        if etag:
+            metadata["etag"] = etag
+        if fallback_urls:
+            metadata["fallback_urls"] = fallback_urls
+        metadata["throttle_detected"] = bool(throttle_detected)
 
         # Atomic write: write to <path>.tmp then os.replace()
         path = self._metadata_path(task_id)

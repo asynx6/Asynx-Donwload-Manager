@@ -57,6 +57,20 @@ a = Analysis(
         'asyncio.windows_events',
         # Phase-D intelligence engine: rotasi User-Agent + httpx http2 opsional.
         'httpx',
+        'httpx._transports.default',
+        'h2',
+        'h2.connection',
+        'h2.config',
+        'h2.events',
+        'h2.errors',
+        'h2.settings',
+        'h2.streams',
+        'h2.utilities',
+        'hyperframe',
+        'hyperframe.frame',
+        'hpack',
+        'hpack.hpack',
+        'hpack.huffman_table',
         # Phase-F: pydantic_core (Rust binary pyd). Setelah execv-relaunch,
         # bundle kadang tidak me-collect ``_pydantic_core.pyd``. Hiddenimport
         # ini sebagai fallback tambahan selain runtime_hook yang me-pre-import.

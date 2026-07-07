@@ -23,7 +23,19 @@ from .merger import merge_parts
 from .metadata_manager import MetadataManager
 from .speed_limiter import SpeedLimiter
 from .parts_dir import get_parts_dir as _get_parts_dir
-import shutil  # used by intelligence strategy DiskGuard
+from .preallocator import (
+    preallocate_file,
+    preallocate_parts,
+    reserve_space,
+)
+from .mirror_selector import MirrorSelector
+from .bandwidth_probe import BandwidthProbe
+from .adaptive_thread_controller import AdaptiveThreadController
+from .geo_chunk_router import GeoChunkRouter
+from .work_stealer import WorkStealer
+from .range_fingerprint import RangeFingerprint, verify_range_support
+from .resume_integrity import ResumeIntegrityValidator
+from .http2_session import Http2Session
 
 
 # AsynxDL application cache directory under %LOCALAPPDATA%:
@@ -61,12 +73,12 @@ class DownloadTask:
             save_path: Path folder tempat menyimpan file (default: %USERPROFILE%\\Downloads).
             filename: Nama file output (opsional, diambil dari URL jika kosong).
             speed_limit_kbps: Batas kecepatan download (0 = unlimited).
-            max_threads: Maksimum thread untuk chunked download (1-8).
+            max_threads: Maksimum thread untuk chunked download (1-16).
             queue_dir: Path ke folder data/queue untuk metadata.
             on_progress: Callback(taskself, dict_progress) dipanggil saat progress update.
         """
         self.url = url
-        self._max_threads = min(max(max_threads, 1), 8)
+        self._max_threads = min(max(max_threads, 1), 16)
         self._on_progress = on_progress
 
         # Metadata manager
@@ -99,6 +111,18 @@ class DownloadTask:
         self._speed_kbps = 0.0
         self._filename = filename
         self._final_path = ""
+        self._fallback_urls: list[str] = []
+        self._mirror_selector: MirrorSelector | None = None
+        self._bandwidth_probe: BandwidthProbe | None = None
+        self._adaptive_controller: AdaptiveThreadController | None = None
+        self._mirror_results: list[dict] = []
+        # BUG #9: lock for _chunks / _futures shared by chunk threads & adaptive spawn
+        self._chunks_lock = threading.Lock()
+        # INEFFICIENT #17: cache for metadata fields in _progress_dict
+        self._meta_cache: dict = {}
+        self._meta_cache_time: float = 0.0
+        self._completed_count_cache: int = 0
+        self._completed_count_cache_time: float = 0.0
 
     # ── Properties ──────────────────────────────────────────────
 
@@ -147,7 +171,7 @@ class DownloadTask:
 
         self._stop_event.clear()
         self._status = "DOWNLOADING"
-        self._session = _build_retry_session()
+        self._session = Http2Session(prefer_http2=True)
 
         try:
             # 1. Probe URL
@@ -156,14 +180,19 @@ class DownloadTask:
             supports_range = info["supports_range"]
             url_filename = info["filename"]
 
-            if self._total_size <= 0:
-                self._status = "ERROR"
-                self._broadcast_progress()
-                return
+            # 1b. Range fingerprint: verify the server actually honors Range requests.
+            try:
+                fp = RangeFingerprint(self.url)
+                fp_result = fp.probe()
+                if fp_result.get("range_unreliable") or fp_result.get("tamper_detected"):
+                    print(f"[DownloadTask] range unreliable/tamper detected for {self.url}; fallback single-thread")
+                    supports_range = False
+                else:
+                    supports_range = fp_result.get("supports_range", supports_range)
+            except Exception as exc:
+                print(f"[DownloadTask] range fingerprint failed: {exc}")
 
             # 2. Resolve filename dan path — pakai resolve_filename() deterministik
-            # supaya URL dengan %20 / karakter encoded tampil benar sejak detik
-            # pertama di UI (bukan "A" atau "unnamed_file").
             filename = resolve_filename(
                 self._requested_filename, url_filename, self.url
             )
@@ -172,7 +201,6 @@ class DownloadTask:
             os.makedirs(save_folder, exist_ok=True)
             filename = resolve_duplicate_name(save_folder, filename)
             final_path = normalize_path(os.path.join(save_folder, filename))
-            # Keamanan: file final harus berada di dalam folder yang diminta
             if not is_safe_path(save_folder, final_path):
                 self._status = "ERROR"
                 self._broadcast_progress()
@@ -180,59 +208,83 @@ class DownloadTask:
             self._filename = filename
             self._final_path = final_path
 
-            # 3. Cek disk space
-            if not check_disk_space(final_path, self._total_size):
-                self._status = "ERROR"
-                self._broadcast_progress()
-                return
-
-            # 4. Hitung chunk count secara dinamis berdasarkan ukuran file.
-            #    ``auto_chunks_for_size`` jadi upper-cap (= max_threads).
-            if not supports_range:
+            # Unknown content length: fall back to single-thread streaming.
+            unknown_length = self._total_size <= 0
+            if unknown_length:
+                supports_range = False
                 thread_count = 1
             else:
-                from .chunk_calculator import auto_chunks_for_size
-                thread_count = auto_chunks_for_size(
-                    self._total_size,
-                    cap=self._max_threads,
-                )
-
-            # 4a. Phase D — Intelligence engine: adaptive threads (overrides
-            # if size <= 1 MB atau is_resume), bandwidth probe, preallocator,
-            # disk guard, mirror failover, dll. Semua strategi no-op by
-            # default, hanya aktif saat caller beri sinyal ``metadata_extra``.
-            try:
-                from .intelligence import decision_for, Policy
-                import shutil
-                free_disk = shutil.disk_usage(
-                    os.path.splitdrive(final_path)[0] or os.path.sep
-                ).free
-                policy = Policy(
-                    total_size=self._total_size,
-                    max_threads=self._max_threads,
-                    supports_range=supports_range,
-                    speed_limit_kbps=self._limiter.limit_kbps,
-                    is_resume=False,
-                    free_disk_bytes=free_disk,
-                    filename=filename,
-                    url=self.url,
-                )
-                plan = decision_for(policy)
-                if plan.actual_threads and plan.actual_threads != thread_count:
-                    thread_count = plan.actual_threads
-                if plan.pause_on_low_disk:
+                # 3. Cek disk space (only when size is known)
+                if not check_disk_space(final_path, self._total_size):
                     self._status = "ERROR"
                     self._broadcast_progress()
                     return
-                if plan.mirror_url and plan.mirror_url != self.url:
-                    try:
-                        self.url = plan.mirror_url
-                    except Exception:
-                        pass
-                if plan.verify_after_merge:
-                    self._meta_mgr.update(self._task_id, verify_after_merge=True)
-            except Exception:
-                pass
+
+                # 4. Hitung chunk count secara dinamis berdasarkan ukuran file.
+                if not supports_range:
+                    thread_count = 1
+                else:
+                    from .chunk_calculator import auto_chunks_for_size
+                    thread_count = auto_chunks_for_size(
+                        self._total_size,
+                        cap=self._max_threads,
+                    )
+
+                # 4b. Pre-allocate final file (best-effort) untuk mengurangi fragmentasi.
+                try:
+                    if not reserve_space(final_path, self._total_size):
+                        self._status = "ERROR"
+                        self._broadcast_progress()
+                        return
+                    preallocate_file(final_path, self._total_size, zero_fill=False)
+                except Exception:
+                    pass
+
+                # 4c. Intelligent mirror/CDN selection: pilih mirror tercepat.
+                try:
+                    selector = MirrorSelector(self.url, expected_length=self._total_size)
+                    best_url, fallbacks = selector.select()
+                    self._mirror_results = selector.results()
+                    if best_url and best_url != self.url:
+                        print(f"[DownloadTask] mirror switch: {self.url} -> {best_url}")
+                        self.url = best_url
+                    self._fallback_urls = fallbacks[:5]
+                except Exception as exc:
+                    print(f"[DownloadTask] mirror selection failed: {exc}")
+
+                # Phase D — Intelligence engine adaptive adjustments.
+                try:
+                    from .intelligence import decision_for, Policy
+                    import shutil
+                    free_disk = shutil.disk_usage(
+                        os.path.splitdrive(final_path)[0] or os.path.sep
+                    ).free
+                    policy = Policy(
+                        total_size=self._total_size,
+                        max_threads=self._max_threads,
+                        supports_range=supports_range,
+                        speed_limit_kbps=self._limiter.limit_kbps,
+                        is_resume=False,
+                        free_disk_bytes=free_disk,
+                        filename=filename,
+                        url=self.url,
+                    )
+                    plan = decision_for(policy)
+                    if plan.actual_threads and plan.actual_threads != thread_count:
+                        thread_count = plan.actual_threads
+                    if plan.pause_on_low_disk:
+                        self._status = "ERROR"
+                        self._broadcast_progress()
+                        return
+                    if plan.mirror_url and plan.mirror_url != self.url:
+                        try:
+                            self.url = plan.mirror_url
+                        except Exception:
+                            pass
+                    if plan.verify_after_merge:
+                        self._meta_mgr.update(self._task_id, verify_after_merge=True)
+                except Exception:
+                    pass
 
             parts_dir = _get_parts_dir()
 
@@ -247,7 +299,27 @@ class DownloadTask:
                 graceful_exit=False,
                 task_id=self._task_id,
                 parts_dir=parts_dir,
+                expected_sha256=info.get("expected_sha256"),
+                expected_md5=info.get("expected_md5"),
+                etag=info.get("etag"),
+                fallback_urls=self._fallback_urls,
             )
+
+            # 5b. Pre-allocate .part files agar sequential write lebih cepat.
+            if not unknown_length and thread_count > 0:
+                try:
+                    chunk_size = (self._total_size + thread_count - 1) // thread_count
+                    chunk_sizes = []
+                    for i in range(thread_count):
+                        start = i * chunk_size
+                        end = min(start + chunk_size - 1, max(self._total_size - 1, 0))
+                        if end >= start:
+                            chunk_sizes.append(end - start + 1)
+                        else:
+                            chunk_sizes.append(0)
+                    preallocate_parts(parts_dir, self._task_id, thread_count, chunk_sizes)
+                except Exception:
+                    pass
 
             self._broadcast_progress()
 
@@ -256,6 +328,14 @@ class DownloadTask:
 
             # 7. Merge jika semua chunk selesai dan tidak di-pause
             if self._status == "DOWNLOADING":
+                # For unknown length, total size is now the size of the downloaded part.
+                if unknown_length:
+                    part_path = os.path.join(parts_dir, f"{self._task_id}.part0")
+                    try:
+                        self._total_size = os.path.getsize(part_path)
+                    except OSError:
+                        self._total_size = 0
+                    self._meta_mgr.update(self._task_id, total_size=self._total_size)
                 self._merge_and_finalize(metadata)
 
         except Exception as exc:
@@ -270,6 +350,7 @@ class DownloadTask:
             if self._session:
                 self._session.close()
                 self._session = None
+            self._stop_intelligence()
 
     def pause(self):
         """Pause download yang sedang berjalan.
@@ -292,6 +373,7 @@ class DownloadTask:
             )
 
         self._shutdown_executor()
+        self._stop_intelligence()
         self._broadcast_progress()
 
     def resume(self):
@@ -316,9 +398,35 @@ class DownloadTask:
         self._downloaded_size = metadata.get("downloaded_size", 0)
         self._filename = metadata.get("filename", self._filename)
         self._final_path = metadata.get("save_path", self._final_path)
+        self._fallback_urls = metadata.get("fallback_urls", [])
+
+        # Phase 6: resume integrity validation — repair inconsistent chunks.
+        try:
+            parts_dir = metadata.get("parts_dir", _get_parts_dir())
+            validator = ResumeIntegrityValidator(self._task_id, parts_dir, metadata)
+            result = validator.validate()
+            if result.get("fixed_chunks", 0) > 0:
+                print(f"[DownloadTask] resume integrity: fixed {result['fixed_chunks']} chunks")
+                metadata = self._meta_mgr.load(self._task_id) or metadata
+                metadata["chunks"] = result["chunks"]
+                self._meta_mgr.update(self._task_id, chunks=result["chunks"], state_hash=result["state_hash"])
+        except Exception as exc:
+            print(f"[DownloadTask] resume integrity validation failed: {exc}")
+
+        # Jika ada fallback URLs, coba mirror selection ulang untuk resume.
+        if self._fallback_urls:
+            try:
+                selector = MirrorSelector(self.url, expected_length=self._total_size)
+                best_url, fallbacks = selector.select()
+                self._mirror_results = selector.results()
+                if best_url and best_url != self.url:
+                    self.url = best_url
+                self._fallback_urls = (fallbacks + self._fallback_urls)[:5]
+            except Exception as exc:
+                print(f"[DownloadTask] resume mirror selection failed: {exc}")
 
         self._stop_event.clear()
-        self._session = _build_retry_session()
+        self._session = Http2Session(prefer_http2=True)
         self._status = "DOWNLOADING"
         self._meta_mgr.update(
             self._task_id,
@@ -346,6 +454,14 @@ class DownloadTask:
             if self._session:
                 self._session.close()
                 self._session = None
+            self._stop_intelligence()
+
+    def set_speed_limit(self, kbps: int):
+        """Update speed limit saat runtime (digunakan oleh global scheduler)."""
+        if self._limiter:
+            self._limiter.limit_kbps = max(0, kbps)
+            if self._task_id:
+                self._meta_mgr.update(self._task_id, speed_limit_kbps=self._limiter.limit_kbps)
 
     def cancel(self):
         """Batalkan download dan bersihkan file chunk terkait.
@@ -374,9 +490,16 @@ class DownloadTask:
                 purge_all_parts_for(self._task_id)
             except Exception:
                 pass
+            # Hapus file final tujuan jika belum selesai (partial file).
+            try:
+                if self._final_path and os.path.exists(self._final_path):
+                    os.remove(self._final_path)
+            except Exception:
+                pass
 
         # Audit-fix M1: broadcast unconditionally supaya WebSocket UI
         # menerima status=CANCELLED terlepas dari old_status.
+        self._stop_intelligence()
         self._broadcast_progress()
 
     # ── Internal Methods ────────────────────────────────────────
@@ -396,7 +519,39 @@ class DownloadTask:
         parts_dir = metadata.get("parts_dir", _get_parts_dir())
         final_path = metadata["save_path"]
 
-        with ThreadPoolExecutor(max_workers=thread_count) as executor:
+        # Phase 2: start bandwidth probe and adaptive controller
+        self._chunks = chunks
+        self._parts_dir = parts_dir
+        try:
+            self._bandwidth_probe = BandwidthProbe(
+                on_throttle=self._on_throttle_detected
+            )
+            self._bandwidth_probe.start()
+            self._adaptive_controller = AdaptiveThreadController(
+                task_id=self._task_id,
+                url=self.url,
+                parts_dir=parts_dir,
+                limiter=self._limiter,
+                stop_event=self._stop_event,
+                session=self._session,
+                max_threads=self._max_threads,
+                on_change=self._on_thread_count_change,
+            )
+            self._adaptive_controller.start(thread_count)
+        except Exception as exc:
+            print(f"[DownloadTask] intelligence start failed: {exc}")
+
+        # Phase 3: geo-routing untuk chunk jika ada fallback URLs
+        router: GeoChunkRouter | None = None
+        if self._fallback_urls and supports_range:
+            try:
+                router = GeoChunkRouter(self.url, self._fallback_urls, expected_length=self._total_size)
+                router.probe()
+                self._fallback_urls = router.urls()
+            except Exception as exc:
+                print(f"[DownloadTask] geo-routing probe failed: {exc}")
+
+        with ThreadPoolExecutor(max_workers=max(thread_count, self._max_threads)) as executor:
             self._executor = executor
             self._futures = []
 
@@ -408,10 +563,12 @@ class DownloadTask:
                     # Chunk sudah selesai
                     continue
 
+                chunk_url = router.url_for_chunk(idx, len(chunks)) if router else self.url
                 part_path = os.path.join(parts_dir, f"{self._task_id}.part{idx}")
+                chunk["part_path"] = part_path
                 future = executor.submit(
                     download_chunk,
-                    url=self.url,
+                    url=chunk_url,
                     start=start,
                     end=end,
                     part_path=part_path,
@@ -419,7 +576,8 @@ class DownloadTask:
                     stop_event=self._stop_event,
                     session=self._session,
                 )
-                self._futures.append((future, chunk))
+                with self._chunks_lock:
+                    self._futures.append((future, chunk))
 
             # Progress flush timer: throttle metadata writes to disk
             self._last_progress_time = time.monotonic()
@@ -429,7 +587,8 @@ class DownloadTask:
             # Monitor futures sampai semua selesai. as_completed timeout yang
             # pendek digunakan untuk memberi kesempatan progress update; kita
             # abaikan TimeoutError karena download mungkin masih berjalan.
-            pending = {f for f, _ in self._futures}
+            with self._chunks_lock:
+                pending = {f for f, _ in self._futures}
             while pending and not self._stop_event.is_set():
                 done = set()
                 try:
@@ -444,6 +603,36 @@ class DownloadTask:
 
                 pending -= done
 
+                # Phase 2: record failures for adaptive controller
+                for future in done:
+                    if future.done() and future.exception() is not None:
+                        try:
+                            if self._adaptive_controller:
+                                self._adaptive_controller.record_failure()
+                        except Exception:
+                            pass
+                        print(f"[DownloadTask] chunk failed: {future.exception()}")
+
+                # Phase 3: work-stealing — jika ada thread idle, curi sub-range chunk lambat
+                if router and done and not self._stop_event.is_set():
+                    try:
+                        with self._chunks_lock:
+                            active_futures = list(self._futures)
+                        stealer = WorkStealer(
+                            task_id=self._task_id,
+                            base_url=self.url,
+                            parts_dir=parts_dir,
+                            limiter=self._limiter,
+                            stop_event=self._stop_event,
+                            session=self._session,
+                            chunks=chunks,
+                            active_futures=active_futures,
+                            executor=executor,
+                        )
+                        stealer.maybe_steal()
+                    except Exception as exc:
+                        print(f"[DownloadTask] work-steal attempt failed: {exc}")
+
                 if self._stop_event.is_set():
                     break
 
@@ -453,7 +642,9 @@ class DownloadTask:
                 self._throttled_meta_flush()
 
             # Tunggu sisa future yang belum selesai (atau cancel)
-            for future, chunk in self._futures:
+            with self._chunks_lock:
+                futures_snapshot = list(self._futures)
+            for future, chunk in futures_snapshot:
                 if future.done():
                     continue
                 try:
@@ -462,7 +653,8 @@ class DownloadTask:
                     pass
 
             self._executor = None
-            self._futures = []
+            with self._chunks_lock:
+                self._futures = []
 
     def _update_downloaded_size_from_parts(self, chunks: list, parts_dir: str):
         """Hitung total byte terdownload dari ukuran file .part di disk.
@@ -508,6 +700,17 @@ class DownloadTask:
             self._speed_kbps = (delta_bytes / elapsed) / 1024.0 if elapsed > 0 else 0.0
             self._last_progress_time = now
             self._last_downloaded = self._downloaded_size
+            # Phase 2: feed intelligence modules
+            try:
+                if self._bandwidth_probe:
+                    self._bandwidth_probe.feed(self._speed_kbps)
+            except Exception:
+                pass
+            try:
+                if self._adaptive_controller:
+                    self._adaptive_controller.feed_speed(self._speed_kbps)
+            except Exception:
+                pass
             self._broadcast_progress()
 
     def _merge_and_finalize(self, metadata: dict):
@@ -533,12 +736,29 @@ class DownloadTask:
             part_files=part_files,
             output_path=temp_output,
             expected_size=self._total_size,
+            expected_sha256=metadata.get("expected_sha256"),
+            expected_md5=metadata.get("expected_md5"),
+            etag=metadata.get("etag"),
         )
 
         if success:
             try:
                 os.replace(temp_output, final_path)
                 self._status = "COMPLETED"
+                
+                # Antivirus scan
+                try:
+                    from .antivirus import scan_file
+                    scan_res = scan_file(final_path)
+                    print(f"[DownloadTask] Antivirus scan result: {scan_res}")
+                    self._meta_mgr.update(
+                        self._task_id,
+                        antivirus_status=scan_res.get("status"),
+                        antivirus_message=scan_res.get("message")
+                    )
+                except Exception as av_exc:
+                    print(f"[DownloadTask] Antivirus scan failed: {av_exc}")
+
                 # History persistence: pindahkan metadata ke completed/ folder
                 # alih-alih menghapusnya seperti sebelumnya. Dengan begitu,
                 # tab "Done" pada UI terus menampilkan file yang selesai di
@@ -592,7 +812,12 @@ class DownloadTask:
             "eta_seconds": self.eta_seconds,
         }
         if self._task_id:
-            meta = self._meta_mgr.load(self._task_id)
+            now = time.monotonic()
+            meta = self._meta_cache if now - self._meta_cache_time < 5.0 else None
+            if meta is None:
+                meta = self._meta_mgr.load(self._task_id)
+                self._meta_cache = meta or {}
+                self._meta_cache_time = now
             if meta:
                 for key in ("graceful_exit", "speed_limit_kbps", "thread_count",
                             "chunks", "created_at", "updated_at"):
@@ -602,6 +827,103 @@ class DownloadTask:
         info.setdefault("speed_limit_kbps", 0)
         info.setdefault("thread_count", 1)
         info.setdefault("chunks", [])
+        info.setdefault("fallback_urls", self._fallback_urls)
+        info.setdefault("mirror_results", self._mirror_results)
         info.setdefault("created_at", "")
         info.setdefault("updated_at", "")
         return info
+
+    def _stop_intelligence(self):
+        """Stop bandwidth probe and adaptive controller threads."""
+        try:
+            if self._bandwidth_probe:
+                self._bandwidth_probe.stop()
+        except Exception:
+            pass
+        try:
+            if self._adaptive_controller:
+                self._adaptive_controller.stop()
+        except Exception:
+            pass
+
+    def _on_throttle_detected(self, current_speed: float, median_speed: float):
+        """Callback saat bandwidth probe mendeteksi throttle."""
+        print(
+            f"[DownloadTask] throttle detected task={self._task_id}: "
+            f"current={current_speed:.1f} KB/s median={median_speed:.1f} KB/s"
+        )
+        # Prefer fallback mirror if available; otherwise TurboRouter will rotate UA next chunk.
+        if self._fallback_urls and self._fallback_urls[0] != self.url:
+            new_url = self._fallback_urls.pop(0)
+            print(f"[DownloadTask] switching to fallback mirror: {new_url}")
+            self.url = new_url
+            if self._task_id:
+                self._meta_mgr.update(self._task_id, url=new_url)
+        elif self._task_id:
+            self._meta_mgr.update(self._task_id, throttle_detected=True)
+
+    def _on_thread_count_change(self, new_count: int):
+        """Callback saat adaptive controller memutuskan thread baru."""
+        if not self._task_id or new_count <= 0:
+            return
+        print(f"[DownloadTask] adaptive thread count task={self._task_id}: {new_count}")
+        self._meta_mgr.update(self._task_id, thread_count=new_count)
+        # Actually spawn an extra chunk thread if the pool is still running.
+        try:
+            if self._executor and self._chunks and not self._stop_event.is_set():
+                with self._chunks_lock:
+                    self._spawn_extra_chunk(self._chunks, self._executor)
+        except Exception as exc:
+            print(f"[DownloadTask] spawn extra chunk failed: {exc}")
+
+    def _spawn_extra_chunk(self, chunks: list, executor: ThreadPoolExecutor) -> bool:
+        """Split the slowest remaining chunk and submit a new future for the second half."""
+        slowest = None
+        max_remaining = 0
+        for chunk in chunks:
+            start = chunk["start"] + chunk.get("bytes_done", 0)
+            end = chunk["end"]
+            if start >= end:
+                continue
+            remaining = end - start + 1
+            if remaining > max_remaining:
+                max_remaining = remaining
+                slowest = chunk
+
+        if slowest is None or max_remaining < 2 * 1024 * 1024:
+            return False
+
+        idx = slowest["index"]
+        start = slowest["start"] + slowest.get("bytes_done", 0)
+        end = slowest["end"]
+        mid = start + (end - start) // 2
+        if mid >= end - 1:
+            return False
+
+        slowest["end"] = mid
+        part_path = os.path.join(
+            self._parts_dir or _get_parts_dir(),
+            f"{self._task_id}.part{idx}_split{int(time.time() * 1000)}"
+        )
+        new_chunk = {
+            "index": idx,
+            "start": mid + 1,
+            "end": end,
+            "bytes_done": 0,
+            "part_path": part_path,
+        }
+        chunks.append(new_chunk)
+
+        future = executor.submit(
+            download_chunk,
+            url=self.url,
+            start=new_chunk["start"],
+            end=new_chunk["end"],
+            part_path=part_path,
+            limiter=self._limiter,
+            stop_event=self._stop_event,
+            session=self._session,
+        )
+        self._futures.append((future, new_chunk))
+        print(f"[DownloadTask] spawned extra chunk: {new_chunk['start']}-{new_chunk['end']}")
+        return True

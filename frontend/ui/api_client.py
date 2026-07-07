@@ -149,6 +149,14 @@ class APIClient:
         folder = os.path.dirname(path) if os.path.isfile(path) else path
         os.startfile(folder)
 
+    def run_file(self, path: str) -> bool:
+        """Run the file at the given path using the default system application."""
+        try:
+            os.startfile(path)
+            return True
+        except Exception as exc:
+            return self._envelope_err("run_file", exc)
+
     # ---------------------------------------------------------------- ws ops
     def set_progress_callback(self, callback: Callable[[dict], None]):
         self._on_progress = callback
@@ -172,7 +180,8 @@ class APIClient:
 
         def on_open(ws):
             try:
-                ws.send("ping")
+                ws.send(token)  # Kirim token sebagai pesan pertama
+                ws.send("ping")  # Kirim ping setelah token terverifikasi
             except Exception:
                 pass
 
@@ -180,7 +189,7 @@ class APIClient:
             while self._running:
                 try:
                     self._ws = websocket.WebSocketApp(
-                        f"{self._ws_url}?token={token}",
+                        self._ws_url,  # Token dihapus dari query parameter
                         on_message=on_message,
                         on_open=on_open,
                     )

@@ -2,6 +2,11 @@
 
 Palet flat-only greys + putih (light & dark). Tidak boleh ada warna ungu, biru,
 hijau — semuanya bernuansa grey/white kaku. Semua corner_radius dipaksa 0.
+
+CustomTkinter di Windows sering gagal menerapkan light/dark mode melalui
+tuple colors. Maka disediakan ``tokens_for(mode)`` yang mengembalikan warna
+literal (bukan tuple) untuk mode tertentu, dan ``repaint(root, mode)`` yang
+secara rekursif mengubah warna setiap widget yang sudah dibuat.
 """
 
 from typing import Iterable
@@ -12,20 +17,20 @@ from typing import Iterable
 # --------------------------------------------------------------------------- #
 PALETTE = {
     "light": {
-        "BG":       "#E0E0E0",   # kanvas utama
-        "BG2":      "#F5F5F5",   # panel content (home / setting)
-        "BG3":      "#FFFFFF",   # kartu download / input field
-        "FG":       "#000000",   # teks primer
-        "FG2":      "#404040",   # teks sekunder / disabled
-        "BORDER":   "#C0C0C0",   # garis batas
-        "BORDER2":  "#A0A0A0",   # garis batas dip
-        "SEL_BG":   "#808080",   # tab aktif / button hover
-        "SEL_FG":   "#FFFFFF",   # tab aktif / button hover text
-        "SEL_DEEP": "#5A5A5A",   # button pressed
-        "ACCENT":   "#404040",   # tombol-tombol primer (grey, bukan warna)
-        "ACCENT_H": "#202020",   # hover dari accent
-        "PROGRESS": "#606060",   # progressbar fill
-        "ERROR":    "#404040",   # error tidak boleh merah; abu pekat
+        "BG":       "#FFFFFF",   # kanvas utama — putih bersih
+        "BG2":      "#FFFFFF",   # panel content — putih bersih
+        "BG3":      "#FFFFFF",   # kartu download / input field — putih bersih
+        "FG":       "#1A1A1A",   # teks primer — near-black
+        "FG2":      "#666666",   # teks sekunder / disabled — grey
+        "BORDER":   "#CCCCCC",   # garis batas — light grey
+        "BORDER2":  "#999999",   # garis batas dip — medium grey
+        "SEL_BG":   "#E0E0E0",   # tab aktif / button hover — light grey
+        "SEL_FG":   "#1A1A1A",   # tab aktif text — dark
+        "SEL_DEEP": "#C0C0C0",   # button pressed — grey
+        "ACCENT":   "#333333",   # tombol-tombol primer — dark grey
+        "ACCENT_H": "#1A1A1A",   # hover dari accent — near-black
+        "PROGRESS": "#666666",   # progressbar fill — grey
+        "ERROR":    "#333333",   # error abu pekat
     },
     "dark": {
         "BG":       "#1F1F1F",
@@ -46,6 +51,10 @@ PALETTE = {
 }
 
 
+# --------------------------------------------------------------------------- #
+# Public helpers
+# --------------------------------------------------------------------------- #
+
 def get(mode: str = "light") -> dict:
     """Kembalikan palet untuk mode tertentu; fallback ke light."""
     key = (mode or "light").strip().lower()
@@ -55,7 +64,12 @@ def get(mode: str = "light") -> dict:
 
 
 def tokens(mode: str = "light") -> dict:
-    """Kembalikan palet + versi tuple CTk sebagai dict siap-pakai."""
+    """Kembalikan palet sebagai tuple (light, dark) untuk CTk compatibility.
+
+    Karena CustomTkinter di Windows terkadang tidak menerapkan switch
+    light/dark secara otomatis, sebagian besar UI mengambil warna literal
+    dari ``tokens_for(mode)``.
+    """
     p = get(mode)
     d = PALETTE["dark"]
     return {
@@ -76,6 +90,15 @@ def tokens(mode: str = "light") -> dict:
     }
 
 
+def tokens_for(mode: str = "light") -> dict:
+    """Kembalikan palet literal (single color) untuk ``mode``.
+
+    Ini digunakan untuk memaksa warna widget yang sudah dibuat agar sesuai
+    mode aktif, karena CTk tuple colors tidak selalu reliable di Windows.
+    """
+    return get(mode)
+
+
 def font(size: int, bold: bool = False) -> tuple:
     """Kembali tuple (Arial, size[, bold])."""
     if bold:
@@ -93,57 +116,78 @@ INPUT_HEIGHT  = 30
 LIST_ROW_HEIGHT = 92
 
 
-def repaint_tokens(root) -> int:
-    """Best-effort: re-paint semua widget Brutalist pada token baru.
+# --------------------------------------------------------------------------- #
+# Runtime repaint helpers
+# --------------------------------------------------------------------------- #
 
-    Returns jumlah widget yang di-repaint. Tidak menjamin 100% coverage karena
-    CTk internal state tidak sepenuhnya bisa di-mutate ulang mode-nya. Untuk
-    perubahan theme yang subtle, lebih baik pakai RestartDialog.
-    """
-    try:
-        from .theme import tokens as _tokens
-        return _apply_tokens_recursive(root, _tokens(_current_mode(root)))
-    except Exception:
-        return 0
+_CURRENT_MODE = "light"
 
 
-# Internal helper di-namespace akhir agar import mengalir linier.
+def set_mode(mode: str) -> None:
+    """Set mode global yang sedang aktif."""
+    global _CURRENT_MODE
+    _CURRENT_MODE = (mode or "light").strip().lower()
 
-_CURRENT_MODE = "light"  # default Brutalist
 
-
-def _current_mode(root=None) -> str:
-    """Best-effort lookup mode aktif"""
-    try:
-        if root is not None and hasattr(root, "_asynx_mode"):
-            return root._asynx_mode or "light"
-    except Exception:
-        pass
+def current_mode() -> str:
     return _CURRENT_MODE
 
 
+def repaint(root, mode: str | None = None) -> int:
+    """Rekursif reconfigure fg_color, text_color, border_color, dll.
+
+    Returns jumlah widget yang di-repaint. Tidak menjamin 100% coverage
+    karena CTk internal state tidak sepenuhnya bisa di-mutate ulang,
+    tapi cukup untuk memperbaiki masalah light mode yang malah tampil dark.
+    """
+    if mode is None:
+        mode = current_mode()
+    tk = tokens_for(mode)
+    return _apply_tokens_recursive(root, tk)
+
+
 def _apply_tokens_recursive(widget, tk: dict) -> int:
-    """Reconfigure fg_color/text_color semua widget Brutalist di-subtree."""
+    """Reconfigure warna semua widget Brutalist di-subtree."""
     count = 0
     try:
-        try:
-            cfg = widget.configure
-        except Exception:
-            cfg = None
-        if cfg is not None:
-            try:
-                if widget.cget("fg_color") is not None and "BG" in tk:
-                    widget.configure(fg_color=tk.get("BG2", tk.get("BG")))
-            except Exception:
-                pass
-            try:
-                if widget.cget("text_color") is not None and "FG" in tk:
-                    widget.configure(text_color=tk.get("FG"))
-            except Exception:
-                pass
-            count += 1
+        cfg = widget.configure
     except Exception:
+        cfg = None
+    if cfg is None:
         pass
+    else:
+        try:
+            widget.configure(fg_color=tk["BG3"])
+        except Exception:
+            try:
+                widget.configure(fg_color=tk["BG2"])
+            except Exception:
+                pass
+        try:
+            widget.configure(text_color=tk["FG"])
+        except Exception:
+            pass
+        try:
+            widget.configure(border_color=tk["BORDER"])
+        except Exception:
+            pass
+        try:
+            widget.configure(placeholder_text_color=tk["FG2"])
+        except Exception:
+            pass
+        try:
+            widget.configure(button_color=tk["ACCENT"])
+        except Exception:
+            pass
+        try:
+            widget.configure(button_hover_color=tk["ACCENT_H"])
+        except Exception:
+            pass
+        try:
+            widget.configure(progress_color=tk["PROGRESS"])
+        except Exception:
+            pass
+        count += 1
     try:
         for child in widget.winfo_children():
             count += _apply_tokens_recursive(child, tk)
@@ -166,7 +210,7 @@ def apply_window_geometry(root, width: int = 1080, height: int = 720) -> None:
 
 
 __all__: Iterable[str] = (
-    "PALETTE", "get", "tokens", "font",
+    "PALETTE", "get", "tokens", "tokens_for", "font", "set_mode", "current_mode", "repaint",
     "CORNER_NONE", "NAVBAR_HEIGHT", "TAB_HEIGHT", "BUTTON_HEIGHT",
     "INPUT_HEIGHT", "LIST_ROW_HEIGHT", "apply_window_geometry", "FONT_FAMILY",
 )

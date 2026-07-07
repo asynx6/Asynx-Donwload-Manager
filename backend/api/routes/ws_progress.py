@@ -10,7 +10,7 @@ import asyncio
 import hmac
 from typing import Set
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from backend.api.auth import verify_token_string, _load_real_token
 from backend.api.state import manager as download_manager
@@ -26,7 +26,6 @@ class ConnectionManager:
         self._lock = asyncio.Lock()
 
     async def connect(self, websocket: WebSocket):
-        await websocket.accept()
         async with self._lock:
             self._connections.add(websocket)
 
@@ -53,13 +52,17 @@ manager = ConnectionManager()
 
 
 @router.websocket("/ws/progress")
-async def ws_progress(websocket: WebSocket, token: str = Query(...)):
-    if not _load_real_token() or not verify_token_string(token):
-        # Reject sebelum accept() supaya client tidak mendapatkan partial frame.
-        await websocket.close(code=1008, reason="forbidden")
-        return
-    await manager.connect(websocket)
+async def ws_progress(websocket: WebSocket):
+    await websocket.accept()
     try:
+        # Token dikirim sebagai pesan pertama setelah koneksi
+        data = await websocket.receive_text()
+        if not _load_real_token() or not verify_token_string(data):
+            await websocket.close(code=1008, reason="forbidden")
+            return
+        await manager.connect(websocket)
+        # Kirim konfirmasi token valid
+        await websocket.send_text("auth_success")
         while True:
             data = await websocket.receive_text()
             if data == "ping":

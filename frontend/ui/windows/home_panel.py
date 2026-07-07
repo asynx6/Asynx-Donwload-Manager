@@ -38,8 +38,9 @@ class HomePanel(ctk.CTkFrame):
         self._search = ""
         self._settings: dict = {}
         self._ui_queue: queue.Queue = queue.Queue()
+        self._loading: bool = False
 
-        tk = theme.tokens(mode)
+        tk = theme.tokens_for(mode)
         self.configure(fg_color=tk["BG2"])
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
@@ -79,12 +80,22 @@ class HomePanel(ctk.CTkFrame):
 
     def on_show(self) -> None:
         # dipanggil TabManager ketika tab ini di-tkraise ke depan.
+        from frontend.ui.i18n import get_language
+        cfg = (self._api.get_settings() if self._api else {}) or {}
+        current_mode = cfg.get("theme", self._mode)
+        current_lang = cfg.get("language", get_language())
+        if current_mode != self._mode or current_lang != get_language():
+            from frontend.ui.i18n import set_language
+            set_language(current_lang)
+            ctk.set_appearance_mode(current_mode)
+            theme.set_mode(current_mode)
+            self.refresh_text(mode=current_mode)
         self._load_data()
 
     # ------------------------------------------------------------------ UI build
 
     def _build_toolbar(self) -> None:
-        tk = theme.tokens(self._mode)
+        tk = theme.tokens_for(self._mode)
         toolbar = ctk.CTkFrame(self, fg_color=tk["BG2"], corner_radius=theme.CORNER_NONE)
         toolbar.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 6))
         toolbar.grid_columnconfigure(0, weight=1)
@@ -124,13 +135,14 @@ class HomePanel(ctk.CTkFrame):
         self._btn_add.grid(row=0, column=2, sticky="e")
 
     def _build_filter_row(self) -> None:
-        tk = theme.tokens(self._mode)
+        tk = theme.tokens_for(self._mode)
         row = ctk.CTkFrame(self, fg_color=tk["BG2"], corner_radius=theme.CORNER_NONE)
         row.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 6))
         for i in range(len(_FILTERS)):
             row.grid_columnconfigure(i, weight=1)
         self._filter_chip_row = row
 
+        self._filter_label_keys = {key: label_key for key, label_key in _FILTERS}
         for i, (key, label_key) in enumerate(_FILTERS):
             btn = ctk.CTkButton(
                 row, text=t(label_key),
@@ -150,12 +162,50 @@ class HomePanel(ctk.CTkFrame):
         self._set_filter("all")
 
     def _build_list(self) -> None:
-        tk = theme.tokens(self._mode)
+        tk = theme.tokens_for(self._mode)
         self._list_frame = ctk.CTkScrollableFrame(
             self, fg_color=tk["BG2"], corner_radius=theme.CORNER_NONE
         )
         self._list_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
         self._list_frame.grid_columnconfigure(0, weight=1)
+
+    # ------------------------------------------------------------------ live refresh
+
+    def refresh_text(self, mode: str | None = None) -> None:
+        """Update semua label statis setelah language/theme berubah."""
+        if mode is not None:
+            self._mode = mode
+        theme.set_mode(self._mode)
+        tk = theme.tokens_for(self._mode)
+        self.configure(fg_color=tk["BG2"])
+        try:
+            self._entry_search.configure(placeholder_text=t("toolbar.search_placeholder"))
+        except Exception:
+            pass
+        try:
+            self._btn_add.configure(text=f"+ {t('btn.download', default='⬇ Download')}", fg_color=tk["ACCENT"],
+                                    hover_color=tk["ACCENT_H"], text_color=tk["SEL_FG"],
+                                    border_color=tk["BORDER2"])
+        except Exception:
+            pass
+        try:
+            self._empty_label.configure(text=t("empty.no_downloads"), text_color=tk["FG2"])
+        except Exception:
+            pass
+        for key, label_key in _FILTERS:
+            btn = self._filter_buttons.get(key)
+            if btn is None:
+                continue
+            try:
+                btn.configure(text=t(label_key), text_color=tk["FG"], border_color=tk["BORDER"],
+                              hover_color=tk["SEL_DEEP"])
+            except Exception:
+                pass
+        self._set_filter(self._filter)
+        try:
+            theme.repaint(self, mode=self._mode)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ state
 
@@ -163,7 +213,7 @@ class HomePanel(ctk.CTkFrame):
         if key not in self._filter_buttons:
             return
         self._filter = key
-        tk = theme.tokens(self._mode)
+        tk = theme.tokens_for(self._mode)
         for k, btn in self._filter_buttons.items():
             if k == key:
                 btn.configure(
@@ -207,12 +257,18 @@ class HomePanel(ctk.CTkFrame):
     def _load_data(self) -> None:
         if not self._api:
             return
+        # INEFFICIENT #15: cegah thread menumpuk jika API lambat.
+        if self._loading:
+            return
+        self._loading = True
         def _do() -> None:
             try:
                 items = self._api.list_downloads()
                 self._schedule_ui(lambda it=items: self._render(it))
             except Exception as exc:
                 print(f"[HomePanel] load failed: {exc}")
+            finally:
+                self._loading = False
         threading.Thread(target=_do, daemon=True).start()
 
     def _poll(self) -> None:
@@ -259,7 +315,7 @@ class HomePanel(ctk.CTkFrame):
                     pass
             else:
                 try:
-                    new_card = DownloadCard(self._list_frame, self._api, item, on_change=self._load_data)
+                    new_card = DownloadCard(self._list_frame, self._api, item, on_change=self._load_data, mode=self._mode)
                     self._cards[tid] = new_card
                 except Exception as exc:
                     print(f"[HomePanel] failed to create card: {exc}")
@@ -273,6 +329,14 @@ class HomePanel(ctk.CTkFrame):
                     card.destroy()
                 except Exception:
                     pass
+
+        # recolor existing cards if theme changed
+        for card in self._cards.values():
+            try:
+                if hasattr(card, "recolor"):
+                    card.recolor(self._mode)
+            except Exception:
+                pass
 
         self._apply_filter()
 

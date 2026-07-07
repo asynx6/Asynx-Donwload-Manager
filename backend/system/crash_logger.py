@@ -12,6 +12,7 @@ import datetime
 import os
 import sys
 import traceback
+import threading
 
 
 def _log_dir() -> str:
@@ -98,14 +99,21 @@ class _LogStream:
     def __init__(self, path: str, original):
         self._path = path
         self._original = original
-        self._buffer = []
+        self._lock = threading.Lock()
+        self._file = None
+        try:
+            self._file = open(self._path, "a", encoding="utf-8", buffering=1)
+        except Exception:
+            self._file = None
 
     def _write_line(self, line: str):
         try:
-            with open(self._path, "a", encoding="utf-8") as f:
-                f.write(line)
+            with self._lock:
+                if self._file is None:
+                    return
+                self._file.write(line)
                 if not line.endswith("\n"):
-                    f.write("\n")
+                    self._file.write("\n")
         except Exception:
             pass
 
@@ -115,14 +123,31 @@ class _LogStream:
         except Exception:
             pass
         try:
-            with open(self._path, "a", encoding="utf-8") as f:
-                f.write(data)
+            with self._lock:
+                if self._file is not None:
+                    self._file.write(data)
         except Exception:
             pass
 
     def flush(self):
         try:
+            with self._lock:
+                if self._file is not None:
+                    self._file.flush()
             self._original.flush()
+        except Exception:
+            pass
+
+    def close(self):
+        try:
+            self.flush()
+        except Exception:
+            pass
+        try:
+            with self._lock:
+                if self._file is not None:
+                    self._file.close()
+                    self._file = None
         except Exception:
             pass
 

@@ -116,7 +116,7 @@ class AdaptiveThreadDecision(Strategy):
         plan.notes.append(f"adaptive_threads={plan.actual_threads}")
 
 
-class MirrorSelector(Strategy):
+class MirrorStrategy(Strategy):
     """Strategy #2 — fallback to alternate mirror.
 
     Caller harus mengisi ``policy.metadata_extra['mirrors']`` (list URL).
@@ -141,6 +141,10 @@ class MirrorSelector(Strategy):
         except Exception:
             pass
 
+
+# Backward-compatible import alias; implementation class is renamed to avoid
+# confusion with backend.core.mirror_selector.MirrorSelector.
+MirrorSelector = MirrorStrategy
 
 class BandwidthProbe(Strategy):
     """Strategy #3 — kalibrasi ``speed_limit`` default.
@@ -224,7 +228,7 @@ class IntelligenceEngine:
         if strategies is None:
             self._strategies: list[Strategy] = [
                 AdaptiveThreadDecision(),
-                MirrorSelector(),
+                MirrorStrategy(),
                 BandwidthProbe(),
                 PreAllocator(),
                 ChecksumVerifier(),
