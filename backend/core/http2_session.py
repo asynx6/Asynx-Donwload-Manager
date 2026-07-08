@@ -51,13 +51,17 @@ class Http2Session:
 
     def get(self, url: str, headers: dict | None = None, stream: bool = True, timeout: float = 30.0, allow_redirects: bool = True):
         self._ensure_client()
-        if self._use_http2 and self._httpx_client:
+        # FIX Bug #2: httpx.Client.get() TIDAK streaming — dia download
+        # SELURUH body ke memory. Untuk file besar (4GB+), ini timeout 30s
+        # per chunk dan bikin download stuck di 0B.
+        # Saat stream=True (untuk chunk download), SELALU pakai requests
+        # yang mendukung streaming via iter_content().
+        # httpx hanya dipakai untuk non-streaming request (HEAD, probe, dll).
+        if not stream and self._use_http2 and self._httpx_client:
             try:
-                # httpx stream returns a Response that supports iter_bytes
                 resp = self._httpx_client.get(url, headers=headers, timeout=timeout, follow_redirects=True)
                 if resp.status_code < 400:
                     return _HttpxResponseAdapter(resp)
-                # If server returned error, fall back to requests
                 self._use_http2 = False
             except Exception as exc:
                 print(f"[Http2Session] httpx request failed: {exc}; fallback to requests")

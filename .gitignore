@@ -21,6 +21,9 @@ ehthumbs.db
 Desktop.ini
 .DS_Store
 
+# --- IDEs ---
+.vscode/
+
 # --- Project artefacts ---
 testfile.bin
 

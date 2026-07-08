@@ -9,7 +9,7 @@ PROJECT_ROOT = Path(r'C:\Users\asynx\Downloads\AsynxDL')
 block_cipher = None
 
 added_files = [
-    (str(PROJECT_ROOT / 'Logo.png'), '.'),
+    (str(PROJECT_ROOT / 'frontend' / 'ui' / 'assets' / 'icons' / 'logo.png'), '.'),
     (str(PROJECT_ROOT / 'frontend' / 'ui' / 'assets'), 'frontend/ui/assets'),
     (str(PROJECT_ROOT / 'frontend' / 'ui' / 'i18n'), 'frontend/ui/i18n'),
     (str(PROJECT_ROOT / 'data' / 'queue'), 'data/queue'),

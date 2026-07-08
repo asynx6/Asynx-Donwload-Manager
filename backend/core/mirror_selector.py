@@ -52,11 +52,19 @@ def _is_private_or_loopback(hostname: str) -> bool:
 
 
 def _candidate_hosts(hostname: str) -> list[str]:
-    """Generate mirror hostname variants dari hostname asli."""
+    """Generate mirror hostname variants dari hostname asli.
+
+    Skip untuk IP loopback/private — tidak ada CDN mirror untuk localhost.
+    """
     if not hostname:
         return []
+    # FIX: skip mirror probing untuk loopback/private IP (localhost, 192.168.x, dll)
+    # Tidak ada CDN mirror untuk IP internal; probing hanya buang waktu.
+    if _is_private_or_loopback(hostname):
+        return [hostname]
     hostname = hostname.lower().lstrip("www.")
-    prefixes = ["cdn", "edge", "dl", "static", "mirror", "download", "fast"]
+    # FIX: hanya 3 mirror paling umum, bukan7 — mengurangi DNS probe overhead
+    prefixes = ["cdn", "dl", "mirror"]
     candidates = [hostname]
     seen = {hostname}
     for prefix in prefixes:
@@ -80,10 +88,11 @@ def _build_candidate_urls(original_url: str) -> list[str]:
     return candidates
 
 
-def _probe_one(url: str, expected_length: int | None, timeout: float = 8.0) -> dict:
+def _probe_one(url: str, expected_length: int | None, timeout: float = 3.0) -> dict:
     """Kirim HEAD request ke URL candidate dan ukur latensi.
 
     SECURITY #13: Validasi bahwa target bukan IP private/loopback.
+    FIX: Pakai session tanpa retry supaya DNS failure tidak nunggu 5x backoff.
     """
     # SSRF guard: tolak probe ke host yang resolve ke IP private/loopback.
     try:
@@ -93,7 +102,10 @@ def _probe_one(url: str, expected_length: int | None, timeout: float = 8.0) -> d
             return {"url": url, "ok": False, "latency_ms": 0, "reason": "private/loopback IP rejected"}
     except Exception:
         pass
-    session = _build_retry_session()
+    # FIX: plain session tanpa retry — mirror probe harus cepat.
+    # _build_retry_session() punya 5 retries + backoff = DNS failure makan ~15s.
+    session = requests.Session()
+    session.headers["User-Agent"] = _USER_AGENT
     start = time.monotonic()
     try:
         resp = session.head(

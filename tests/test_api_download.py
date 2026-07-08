@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.api.server import create_app
+from backend.api.state import manager
 from backend.system.config import load_config
 
 
@@ -40,3 +41,34 @@ def test_add_download_real_network(client):
 def client():
     app = create_app()
     return TestClient(app)
+
+def test_add_same_url_after_error(client):
+    """User bisa re-add URL yang sama setelah task sebelumnya ERROR/COMPLETED.
+
+    Verifikasi: duplicate check di start_new cleanup task ERROR/CANCELLED
+    supaya user bisa retry download tanpa restart app.
+    """
+    token = load_config()["api_secret_token"]
+    headers = {"X-AsynxDL-Token": token}
+    test_url = f"http://127.0.0.1:1/test_retry_{int(time.time())}.bin"
+
+    # Simulate: tambah task, lalu paksa status ke ERROR
+    result = manager.start_new(url=test_url)
+    assert "id" in result, f"start_new failed: {result}"
+    task_id1 = result["id"]
+
+    # Force task ke ERROR (simulasi download gagal)
+    with manager._lock:
+        task = manager._active.get(task_id1)
+        assert task is not None
+        task._status = "ERROR"
+
+    # Re-add URL yang sama — harusnya tidak 409
+    resp2 = client.post(
+        "/downloads/add",
+        json={"url": test_url},
+        headers=headers,
+    )
+    assert resp2.status_code == 200, f"Expected 200, got {resp2.status_code}: {resp2.text}"
+    task_id2 = resp2.json()["id"]
+    assert task_id2 != task_id1, "Should create new task, not reuse old one"

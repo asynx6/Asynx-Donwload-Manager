@@ -230,65 +230,11 @@ class DownloadTask:
                         cap=self._max_threads,
                     )
 
-                # 4b. Pre-allocate final file (best-effort) untuk mengurangi fragmentasi.
-                try:
-                    if not reserve_space(final_path, self._total_size):
-                        self._status = "ERROR"
-                        self._broadcast_progress()
-                        return
-                    preallocate_file(final_path, self._total_size, zero_fill=False)
-                except Exception:
-                    pass
-
-                # 4c. Intelligent mirror/CDN selection: pilih mirror tercepat.
-                try:
-                    selector = MirrorSelector(self.url, expected_length=self._total_size)
-                    best_url, fallbacks = selector.select()
-                    self._mirror_results = selector.results()
-                    if best_url and best_url != self.url:
-                        print(f"[DownloadTask] mirror switch: {self.url} -> {best_url}")
-                        self.url = best_url
-                    self._fallback_urls = fallbacks[:5]
-                except Exception as exc:
-                    print(f"[DownloadTask] mirror selection failed: {exc}")
-
-                # Phase D — Intelligence engine adaptive adjustments.
-                try:
-                    from .intelligence import decision_for, Policy
-                    import shutil
-                    free_disk = shutil.disk_usage(
-                        os.path.splitdrive(final_path)[0] or os.path.sep
-                    ).free
-                    policy = Policy(
-                        total_size=self._total_size,
-                        max_threads=self._max_threads,
-                        supports_range=supports_range,
-                        speed_limit_kbps=self._limiter.limit_kbps,
-                        is_resume=False,
-                        free_disk_bytes=free_disk,
-                        filename=filename,
-                        url=self.url,
-                    )
-                    plan = decision_for(policy)
-                    if plan.actual_threads and plan.actual_threads != thread_count:
-                        thread_count = plan.actual_threads
-                    if plan.pause_on_low_disk:
-                        self._status = "ERROR"
-                        self._broadcast_progress()
-                        return
-                    if plan.mirror_url and plan.mirror_url != self.url:
-                        try:
-                            self.url = plan.mirror_url
-                        except Exception:
-                            pass
-                    if plan.verify_after_merge:
-                        self._meta_mgr.update(self._task_id, verify_after_merge=True)
-                except Exception:
-                    pass
-
             parts_dir = _get_parts_dir()
 
-            # 5. Buat metadata
+            # FIX: Tulis metadata SEGERA setelah probe — supaya UI langsung
+            # tahu total_size dan filename, tanpa nunggu mirror selector
+            # + intelligence engine yang bisa makan 5-10 detik.
             metadata = self._meta_mgr.create(
                 url=self.url,
                 filename=filename,
@@ -304,22 +250,69 @@ class DownloadTask:
                 etag=info.get("etag"),
                 fallback_urls=self._fallback_urls,
             )
+            self._broadcast_progress()
 
-            # 5b. Pre-allocate .part files agar sequential write lebih cepat.
-            if not unknown_length and thread_count > 0:
+            if not unknown_length:
+                # 4b. Pre-allocate final file (best-effort)
                 try:
-                    chunk_size = (self._total_size + thread_count - 1) // thread_count
-                    chunk_sizes = []
-                    for i in range(thread_count):
-                        start = i * chunk_size
-                        end = min(start + chunk_size - 1, max(self._total_size - 1, 0))
-                        if end >= start:
-                            chunk_sizes.append(end - start + 1)
-                        else:
-                            chunk_sizes.append(0)
-                    preallocate_parts(parts_dir, self._task_id, thread_count, chunk_sizes)
+                    if not reserve_space(final_path, self._total_size):
+                        self._status = "ERROR"
+                        self._broadcast_progress()
+                        return
+                    preallocate_file(final_path, self._total_size, zero_fill=False)
                 except Exception:
                     pass
+
+                # 4c + Phase D: Mirror selection + Intelligence — JALAN DI
+                # BACKGROUND supaya download bisa mulai segera.
+                def _bg_optimize():
+                    nonlocal thread_count
+                    try:
+                        selector = MirrorSelector(self.url, expected_length=self._total_size)
+                        best_url, fallbacks = selector.select()
+                        self._mirror_results = selector.results()
+                        if best_url and best_url != self.url:
+                            print(f"[DownloadTask] mirror switch: {self.url} -> {best_url}")
+                            self.url = best_url
+                        self._fallback_urls = fallbacks[:5]
+                    except Exception as exc:
+                        print(f"[DownloadTask] mirror selection failed: {exc}")
+                    try:
+                        from .intelligence import decision_for, Policy
+                        import shutil
+                        free_disk = shutil.disk_usage(
+                            os.path.splitdrive(final_path)[0] or os.path.sep
+                        ).free
+                        policy = Policy(
+                            total_size=self._total_size,
+                            max_threads=self._max_threads,
+                            supports_range=supports_range,
+                            speed_limit_kbps=self._limiter.limit_kbps,
+                            is_resume=False,
+                            free_disk_bytes=free_disk,
+                            filename=filename,
+                            url=self.url,
+                        )
+                        plan = decision_for(policy)
+                        if plan.actual_threads and plan.actual_threads != thread_count:
+                            thread_count = plan.actual_threads
+                        if plan.mirror_url and plan.mirror_url != self.url:
+                            try:
+                                self.url = plan.mirror_url
+                            except Exception:
+                                pass
+                        if plan.verify_after_merge:
+                            self._meta_mgr.update(self._task_id, verify_after_merge=True)
+                    except Exception:
+                        pass
+                threading.Thread(target=_bg_optimize, daemon=True, name="optimize").start()
+
+            # FIX: JANGAN pre-allocate .part files!
+            # Pre-allocate sparse file bikin os.path.getsize() report
+            # ukuran penuh padahal belum ada data → _update_downloaded_size
+            # salah hitung → speed=Infinity, progress=100% palsu.
+            # Part file akan dibuat otomatis oleh download_chunk saat
+            # pertama kali write dengan mode="wb".
 
             self._broadcast_progress()
 
@@ -381,6 +374,8 @@ class DownloadTask:
 
         - Load metadata dari disk (dapatkan byte offset per chunk).
         - Restart thread pool dengan Range yang sudah di-offset.
+        - Jika task ERROR dan metadata tidak valid (total_size=0 atau chunk
+          placeholder), fallback ke start() untuk re-probe dari awal.
         """
         if self._status not in ("PAUSED", "ERROR"):
             return
@@ -391,6 +386,22 @@ class DownloadTask:
         if not metadata:
             self._status = "ERROR"
             self._broadcast_progress()
+            return
+
+        # FIX Bug #3: Jika task ERROR dan metadata tidak valid (total_size=0
+        # atau chunk masih placeholder start=0/end=0), re-probe dari awal.
+        chunks = metadata.get("chunks", [])
+        has_valid_chunks = any(
+            c.get("end", 0) > 0 for c in chunks
+        )
+        if self._status == "ERROR" and (metadata.get("total_size", 0) <= 0 or not has_valid_chunks):
+            print(f"[DownloadTask] resume from ERROR with invalid metadata, re-starting")
+            self._stop_event.clear()
+            self._status = "PENDING"
+            self._downloaded_size = 0
+            self._total_size = 0
+            self._speed_kbps = 0.0
+            self.start()
             return
 
         # Refresh state dari metadata
@@ -745,6 +756,10 @@ class DownloadTask:
             try:
                 os.replace(temp_output, final_path)
                 self._status = "COMPLETED"
+                # FIX: pastikan downloaded_size == total_size saat selesai
+                # supaya progress bar dan teks persen = 100%, bukan 97.6%.
+                self._downloaded_size = self._total_size
+                self._speed_kbps = 0.0
                 
                 # Antivirus scan
                 try:

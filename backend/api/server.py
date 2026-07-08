@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api.middleware import HeaderDefenseMiddleware, RateLimitMiddleware
+from backend.api.middleware import HeaderDefenseMiddleware
 from backend.api.routes import status, downloads, settings, ws_progress
 from backend.api.state import manager as download_manager
 from backend.system.config import load_config
@@ -39,7 +39,10 @@ def create_app() -> FastAPI:
     app = FastAPI(title="AsynxDL", version="1.0.7", lifespan=lifespan)
 
     # ------------------------------------------------------------- middleware
-    # Order matters: Header defense → CORS → Rate limit → router.
+    # Order matters: Header defense → CORS → router.
+    # Rate limit DIHAPUS — AsynxDL bind 127.0.0.1 saja (localhost only),
+    # tidak ada attack surface dari network luar. Rate limit cuma bikin
+    # masalah saat user download banyak file sekaligus.
     app.add_middleware(HeaderDefenseMiddleware)
     app.add_middleware(
         CORSMiddleware,
@@ -48,7 +51,6 @@ def create_app() -> FastAPI:
         allow_headers=["X-AsynxDL-Token", "Content-Type"],
         allow_credentials=False,
     )
-    app.add_middleware(RateLimitMiddleware, max_requests=60, window=60)
 
     # ------------------------------------------------------------- routes
     app.include_router(status.router)

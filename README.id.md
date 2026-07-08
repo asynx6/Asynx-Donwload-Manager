@@ -1,5 +1,3 @@
-# ROMBAK README.md README.id.md
-
 # AsynxDL — Manajer Download Canggih
 
 <p align="center">
@@ -29,7 +27,7 @@
 
 ## Unduhan
 
-Installer dan executable portable sudah tersedia di halaman [Releases](https://github.com/asynx6/asynxdl/releases) (atau di folder `dist/` setelah build).
+Installer dan executable portable sudah tersedia di halaman [Releases](https://github.com/asynx6/Asynx-Donwload-Manager/releases) (atau di folder `dist/` setelah build).
 
 | Paket | Deskripsi |
 |--------|-------------|

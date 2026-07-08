@@ -413,6 +413,27 @@ class DownloadCard(ctk.CTkFrame):
                 return
         except Exception:
             pass
-        threading.Thread(target=self._api.remove_history, args=(self._task_id, True), daemon=True).start()
-        if self._on_change:
-            self._on_change()
+        task_id = self._task_id
+        on_change = self._on_change
+
+        def _vanish() -> None:
+            try:
+                self.destroy()
+            except Exception:
+                pass
+        try:
+            self.master.after(0, _vanish)
+        except Exception:
+            pass
+
+        def _do() -> None:
+            try:
+                self._api.remove_history(task_id, True)
+            except Exception:
+                pass
+            if on_change:
+                try:
+                    on_change()
+                except Exception:
+                    pass
+        threading.Thread(target=_do, daemon=True).start()

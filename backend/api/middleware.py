@@ -60,6 +60,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Exempt static & docs
         if path in ("/docs", "/openapi.json", "/redoc"):
             return await call_next(request)
+        # Exempt read-only polling endpoints (GET /downloads, GET /settings)
+        # supaya frontend poll tiap 2 detik + browser extension tidak kena 429.
+        if request.method == "GET" and path.startswith(("/downloads", "/settings")):
+            return await call_next(request)
 
         peer = request.client.host if request.client else "unknown"
         with self._lock:

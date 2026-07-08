@@ -1,5 +1,3 @@
-# ROMBAK README.md README.id.md
-
 # AsynxDL — Advanced Download Manager
 
 <p align="center">
@@ -29,7 +27,7 @@
 
 ## Download
 
-Pre-built installer and portable executable are available in the [Releases](https://github.com/asynx6/asynxdl/releases) page (or in the `dist/` folder after building).
+Pre-built installer and portable executable are available in the [Releases](https://github.com/asynx6/Asynx-Donwload-Manager/releases) page (or in the `dist/` folder after building).
 
 | Package | Description |
 |--------|-------------|

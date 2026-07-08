@@ -17,7 +17,7 @@ router = APIRouter(dependencies=[Depends(verify_token)])
 @router.post("/add", response_model=DownloadItem)
 async def add_download(req: AddDownloadRequest):
     result = manager.start_new(
-        url=req.url,
+        url=str(req.url),  # FIX: AnyHttpUrl bukan str — konversi dulu
         filename=req.filename or "",
         save_path=req.save_path or "",
         speed_limit_kbps=req.speed_limit_kbps or 0,

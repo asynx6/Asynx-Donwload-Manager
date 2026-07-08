@@ -82,11 +82,29 @@ class DownloadManager:
             except Exception:
                 return {"error": "Invalid URL format"}
 
-            # Cek duplikat URL yang masih aktif
+            # Cek duplikat URL yang masih aktif.
+            # - PENDING/DOWNLOADING → blokir (benar-benar sedang aktif)
+            # - PAUSED → auto-resume (user mau download URL yang sama)
+            # - ERROR/CANCELLED/COMPLETED → cleanup task lama, izinkan re-add
             with self._lock:
-                for task_id, task in self._active.items():
-                    if task.url == url and task.status in ("PENDING", "DOWNLOADING", "PAUSED"):
+                for task_id, task in list(self._active.items()):
+                    if task.url != url:
+                        continue
+                    if task.status in ("PENDING", "DOWNLOADING"):
                         return {"error": "URL already in queue", "id": task_id}
+                    if task.status == "PAUSED":
+                        # Auto-resume task yang sudah ada
+                        try:
+                            self.resume(task_id)
+                        except Exception:
+                            pass
+                        return self._task_info(task)
+                    if task.status in ("ERROR", "CANCELLED", "COMPLETED"):
+                        # Cleanup task lama supaya user bisa re-add
+                        try:
+                            del self._active[task_id]
+                        except KeyError:
+                            pass
 
             config = load_config()
             if save_path:
@@ -121,6 +139,9 @@ class DownloadManager:
             # Resolve filename deterministik sebelum metadata create.
             display_filename = resolve_filename(filename, "", url)
             full_save_path = os.path.join(save_path, display_filename) if display_filename else ""
+            # FIX Bug #1: set filename SEGERA supaya UI langsung tampil nama file.
+            # start() di background thread akan resolve ulang nanti.
+            task._filename = display_filename
 
             try:
                 self._meta_mgr.create(
@@ -216,6 +237,9 @@ class DownloadManager:
                 get_scheduler().register_task(task.task_id, priority=priority)
                 self._apply_scheduler_limits()
                 task.start()
+            except Exception as exc:
+                print(f"[DownloadManager] task {task.task_id} failed: {exc}")
+                import traceback; traceback.print_exc()
             finally:
                 from backend.core.download_scheduler import get_scheduler
                 get_scheduler().unregister_task(task.task_id)
@@ -438,7 +462,23 @@ class DownloadManager:
         return {"ok": True}
 
     def remove_history(self, task_id: str, delete_parts: bool = True) -> dict:
-        """Hapus permanen task dari history completed/ + bersihkan parts."""
+        """Hapus permanen task dari history completed/ + bersihkan parts.
+
+        FIX Bug #4: juga hapus dari _active kalau masih ada (task ERROR/
+        COMPLETED/CANCELLED yang belum di-cleanup).
+        """
+        # Hapus dari _active jika ada (supaya hilang dari UI list)
+        with self._lock:
+            task = self._active.pop(task_id, None)
+        if task:
+            try:
+                task.cancel()
+            except Exception:
+                pass
+            from backend.core.download_scheduler import get_scheduler
+            get_scheduler().unregister_task(task_id)
+            self._apply_scheduler_limits()
+
         parts_dir = None
         meta = self._meta_mgr.load(task_id)
         if meta:
@@ -461,6 +501,8 @@ class DownloadManager:
                 os.remove(final_part)
             except FileNotFoundError:
                 pass
+        # Hapus dari active metadata folder
+        self._meta_mgr.delete(task_id)
         removed = self._meta_mgr.remove_from_history(task_id)
         return {"ok": True, "removed": removed}
 
