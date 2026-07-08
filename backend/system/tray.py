@@ -116,8 +116,7 @@ class TrayIcon:
 
     def _load_icon(self) -> Image.Image:
         paths = [
-            os.path.join(os.path.dirname(__file__), "..", "assets", "icons", "tray.png"),
-            os.path.join(os.path.dirname(__file__), "..", "frontend", "ui", "assets", "icons", "tray.png"),
+            os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "ui", "assets", "icons", "icons.png"),
         ]
         for p in paths:
             if os.path.exists(p):

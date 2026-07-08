@@ -44,7 +44,7 @@ class AsynxDLApp:
         self._theme_mode = theme_mode
         set_language(lang)
         ctk.set_appearance_mode(theme_mode)
-        ctk.set_default_color_theme("dark-blue")  # tidak dipakai (kita pakai token sendiri)
+        ctk.set_default_color_theme("dark-blue")  # tidak dipakai (kita pakai theme sendiri)
 
         # Center window
         theme.apply_window_geometry(self._root, width=1080, height=720)
@@ -98,17 +98,14 @@ class AsynxDLApp:
         try:
             from PIL import Image, ImageTk
             for path in (
-                _LOCAL_LOGO_CANDIDATE,
-                os.path.join(os.path.dirname(__file__), "assets", "icons", "logo.png"),
-                os.path.join(os.path.dirname(__file__), "assets", "icons", "logo.jpg"),
-                os.path.join(os.path.dirname(__file__), "assets", "icons", "tray.png"),
+                os.path.join(os.path.dirname(__file__), "assets", "icons", "icons.png"),
             ):
                 if path and os.path.exists(path):
                     img = Image.open(path)
                     img_tk = ImageTk.PhotoImage(img)
                     self._root.wm_iconphoto(True, img_tk)
                     return
-            print("[AsynxDLApp] icon: no app.ico / no Logo.png found")
+            print("[AsynxDLApp] icon: no icons.png / app.ico found")
         except Exception as exc:
             print(f"[AsynxDLApp] icon load failed: {exc}")
 

@@ -29,10 +29,7 @@ _STATE_HEARTBEAT_INTERVAL_MS = 10_000
 
 def _load_logo_image(size: int = 26):
     candidates = [
-        _LOCAL_LOGO_CANDIDATE,
-        os.path.join(os.path.dirname(__file__), "..", "assets", "icons", "logo.png"),
-        os.path.join(os.path.dirname(__file__), "..", "assets", "icons", "logo.jpg"),
-        os.path.join(os.path.dirname(__file__), "..", "assets", "icons", "tray.png"),
+        os.path.join(os.path.dirname(__file__), "..", "assets", "icons", "icons.png"),
     ]
     for path in candidates:
         try:

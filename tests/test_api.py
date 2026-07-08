@@ -2,7 +2,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.api.server import create_app
-from backend.system.config import load_config
 
 
 @pytest.fixture
@@ -17,39 +16,34 @@ def test_status_without_auth(client):
     assert resp.json()["status"] == "ok"
 
 
-def test_downloads_requires_auth(client):
+def test_downloads_no_auth_required(client):
+    """Token dihapus — GET /downloads harus 200 tanpa auth."""
     resp = client.get("/downloads")
-    assert resp.status_code == 403
+    assert resp.status_code == 200
 
 
-def test_downloads_with_auth(client):
-    token = load_config()["api_secret_token"]
-    resp = client.get("/downloads", headers={"X-AsynxDL-Token": token})
+def test_downloads_accessible(client):
+    resp = client.get("/downloads")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
 
-def test_settings_with_auth(client):
-    token = load_config()["api_secret_token"]
-    resp = client.get("/settings", headers={"X-AsynxDL-Token": token})
+def test_settings_without_auth(client):
+    resp = client.get("/settings")
     assert resp.status_code == 200
 
 
 def test_invalid_url_rejected(client):
-    token = load_config()["api_secret_token"]
     resp = client.post(
         "/downloads/add",
         json={"url": "file:///etc/passwd", "filename": "x"},
-        headers={"X-AsynxDL-Token": token},
     )
     assert resp.status_code == 422
 
 
 def test_path_traversal_rejected(client):
-    token = load_config()["api_secret_token"]
     resp = client.post(
         "/downloads/add",
         json={"url": "http://127.0.0.1/file.bin", "filename": "../../x"},
-        headers={"X-AsynxDL-Token": token},
     )
     assert resp.status_code == 422

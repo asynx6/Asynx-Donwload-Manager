@@ -48,7 +48,7 @@ Installer dan executable portable sudah tersedia di halaman [Releases](https://g
 3. Pilih apakah ingin membuat shortcut desktop.
 4. Buka **AsynxDL** dari Start Menu atau shortcut desktop.
 
-> **Catatan:** Installer memasang aplikasi ke `%LOCALAPPDATA%\Programs\AsynxDL` dan menyimpan pengaturan di `%APPDATA%\AsynxDL`. Saat pertama kali dibuka, aplikasi menampilkan wizard setup untuk memilih bahasa, folder download default, dan menyalin token rahasia untuk ekstensi browser.
+> **Catatan:** Installer memasang aplikasi ke `%LOCALAPPDATA%\Programs\AsynxDL` dan menyimpan pengaturan di `%APPDATA%\AsynxDL`. Saat pertama kali dibuka, aplikasi menampilkan wizard setup untuk memilih bahasa dan folder download default.
 
 ### Opsi B: Executable Portable
 
@@ -75,8 +75,7 @@ AsynxDL menyertakan ekstensi browser berbasis Chromium (Manifest V3). Berfungsi 
 1. Buka browser dan kunjungi halaman ekstensi (`chrome://extensions/` atau `edge://extensions/`).
 2. Aktifkan **Mode Pengembang** (toggle di pojok kanan atas).
 3. Klik **Muat yang belum dibongkar** dan pilih folder `extension/browser/` (atau `%LOCALAPPDATA%\Programs\AsynxDL\extension` setelah instalasi).
-4. Buka aplikasi desktop AsynxDL, lewati wizard pertama kali, dan salin **Token Rahasia**.
-5. Klik ikon ekstensi AsynxDL → **Opsi**, tempel token, lalu klik **Simpan Token**.
+4. Buka aplikasi desktop AsynxDL. Ekstensi terhubung ke API lokal secara otomatis — tidak perlu token.
 
 Setelah setup, ekstensi akan menangkap download di browser dan menanyakan konfirmasi di aplikasi AsynxDL.
 
@@ -156,7 +155,7 @@ AsynxDL adalah manajer download native Windows yang dirancang untuk menyelesaika
 
 AsynxDL hadir dari persimpangan tiga keputusan arsitektur:
 
-1. **Arsitektur lokal-first, mandiri.** Aplikasi menjalankan server HTTP FastAPI di `127.0.0.1:58296` sebagai thread daemon dalam proses Python. API lokal ini menjadi titik koordinasi tunggal antara mesin download (backend), UI desktop (frontend), dan ekstensi browser. Tidak ada layanan cloud, tidak ada dependensi eksternal saat runtime. API dilindungi oleh token HMAC yang dibuat otomatis (`header X-AsynxDL-Token`) dengan perbandingan constant-time untuk mencegah serangan timing.
+1. **Arsitektur lokal-first, mandiri.** Aplikasi menjalankan server HTTP FastAPI di `127.0.0.1:58296` sebagai thread daemon dalam proses Python. API lokal ini menjadi titik koordinasi tunggal antara mesin download (backend), UI desktop (frontend), dan ekstensi browser. Tidak ada layanan cloud, tidak ada dependensi eksternal saat runtime. API hanya bind ke localhost (`127.0.0.1`), sehingga tidak dapat dijangkau dari jaringan — autentikasi tidak diperlukan.
 
 2. **Download paralel berbasis chunk dengan adaptasi cerdas.** Alih-alih melakukan stream file dalam satu koneksi tunggal, AsynxDL melakukan probe ke server untuk `Content-Length` dan `Accept-Ranges`, menghitung jumlah chunk optimal menggunakan heuristik berbasis ukuran (4 chunk untuk file <1MB, hingga 32 untuk file >10GB), dan mendistribusikan pekerjaan melalui `ThreadPoolExecutor`. Setiap chunk diunduh secara independen, ditulis ke file `.part` yang dialokasikan sebelumnya di `%LOCALAPPDATA%\AsynxDL\.parts`, dan digabungkan dengan verifikasi checksum (SHA-256, MD5, ETag) setelah selesai. Sistem secara dinamis menyesuaikan jumlah thread berdasarkan throughput yang diamati, mendeteksi throttling sisi server melalui analisis bandwidth rolling-window, dan dapat melakukan failover ke kandidat mirror/CDN secara otomatis.
 
@@ -216,8 +215,8 @@ Mesin download (`backend/core/downloader.py` → `DownloadTask`) mengorkestrasik
 
 | Lapisan | Mekanisme |
 |---------|-----------|
-| **Autentikasi** | Perbandingan token HMAC constant-time (`hmac.compare_digest`) pada header `X-AsynxDL-Token`; token dibuat sebagai UUID saat pertama kali dijalankan; token placeholder/kosong ditolak |
-| **Pembatasan Rate** | Rate limiter sliding-window: 60 request/menit per IP, dengan LRU bucket eviction setelah 5 menit tidak aktif |
+| **Autentikasi** | Tidak diperlukan — API hanya bind ke `127.0.0.1` dan tidak dapat dijangkau dari jaringan |
+| **Pembatasan Rate** | Tidak ada — aplikasi localhost-only, tidak ada attack surface dari luar |
 | **Pertahanan Host** | `HeaderDefenseMiddleware` menolak request dengan header `Host` yang tidak cocok dengan `127.0.0.1`/`localhost`/`0.0.0.0` |
 | **Path Traversal** | Pydantic `field_validator` menolak traversal `..`, null byte, device path (`\\.\`), dan UNC path (`\\server\share`) pada `save_path` dan `filename` |
 | **Pencegahan SSRF** | Mirror selector memvalidasi bahwa hostname kandidat tidak resolve ke IP private/loopback |
@@ -231,7 +230,7 @@ Mesin download (`backend/core/downloader.py` → `DownloadTask`) mengorkestrasik
 - **Kartu Download:** Menampilkan nama file, teks status, progress bar, info kecepatan/ukuran/ETA, dan tombol aksi (Jeda/Lanjutkan/Batal/Buka Folder/Jalankan/Hapus Riwayat) — semua sensitif konteks berdasarkan status download.
 - **Panel Settings:** Field formulir untuk path download default, batas kecepatan, bahasa (Inggris/Indonesia), tema, dan toggle run-on-startup.
 - **Modal Tambah Download:** Input URL dengan validasi real-time, field batas kecepatan, dan tombol "Mulai Download".
-- **Wizard Pertama Kali:** Setup 3 langkah — pemilihan bahasa → path download + preferensi startup → tampilan token rahasia untuk ekstensi browser.
+- **Wizard Pertama Kali:** Setup 2 langkah — pemilihan bahasa → path download + preferensi startup.
 - **System Tray:** Minimalkan ke tray dengan ikon status dinamis (idle=blue, active=green, blocked=red); menu tray dengan Tampilkan/Jeda Semua/Pengaturan/Keluar; notifikasi balon saat download sedang berjalan.
 - **WebSocket Progress:** Pembaruan progress real-time didorong dari backend melalui `ws://127.0.0.1:58296/ws/progress`, menghilangkan overhead polling.
 - **Multi-bahasa:** Dukungan i18n penuh melalui file terjemahan JSON (`frontend/ui/i18n/en.json`, `id.json`); penggantian bahasa tanpa restart.
@@ -240,8 +239,8 @@ Mesin download (`backend/core/downloader.py` → `DownloadTask`) mengorkestrasik
 
 - **Intersepsi Download:** Listener `chrome.downloads.onCreated` membatalkan download Chrome native dan merelay-nya ke aplikasi desktop melalui `POST /downloads/add`.
 - **Service Worker:** Service worker latar belakang (`background/service_worker.js`) menangani intersepsi, pengecekan kesehatan backend, dan pemicuan popup.
-- **UI Popup:** Dialog konfirmasi yang menampilkan nama file, ukuran, dan path simpan yang diintersepsi; mengirim download ke backend dengan autentikasi token.
-- **Halaman Opsi:** Halaman konfigurasi token untuk menempelkan token rahasia dari aplikasi desktop.
+- **UI Popup:** Dialog konfirmasi yang menampilkan nama file, ukuran, dan path simpan yang diintersepsi; mengirim download ke backend via `POST /downloads/add`.
+- **Halaman Opsi:** Halaman info yang menjelaskan ekstensi terhubung secara lokal tanpa perlu token.
 - **Pemeriksaan Kesehatan Backend:** Ekstensi melakukan ping ke `/status` sebelum mengintersepsi untuk memastikan aplikasi desktop sedang berjalan.
 
 ### Integrasi Sistem
@@ -322,10 +321,10 @@ Ini memastikan aplikasi bertahan dari path restart `os.execv` PyInstaller (yang 
 2. **Pemeriksaan Single Instance:** `_is_another_instance_running(port)` memprobe TCP port; jika terisi, memberi sinyal ke window yang ada melalui Win32 dan keluar
 3. **Peluncuran Server:** `start_server_thread(port)` membuat thread daemon yang menjalankan `uvicorn.run(app, host="127.0.0.1", port=58296)`
 4. **Kesiapan Backend:** `_wait_for_backend(timeout=10)` melakukan polling dengan backoff agresif (50ms → 50ms → 100ms → 200ms → 300ms); menggabungkan probe socket + HTTP GET ke `/status`
-5. **Wizard Pertama Kali:** Jika `first_run_completed` adalah False dalam config, menampilkan wizard 3 langkah (bahasa → path/startup → token)
+5. **Wizard Pertama Kali:** Jika `first_run_completed` adalah False dalam config, menampilkan wizard 2 langkah (bahasa → path/startup)
 6. **Peluncuran UI:** `AsynxDLApp` menginisialisasi root CustomTkinter, memuat tema, mengcenter window, dan merender `MainWindow` dengan tab Home/Settings
 7. **Registrasi Tray:** Saat window ditutup, `TrayIcon` dibuat dengan state provider dinamis; berjalan di thread latar belakang melalui `pystray`
-8. **Koneksi WebSocket:** `APIClient.start_ws()` meng-establish WebSocket persisten ke `/ws/progress` untuk pembaruan progress real-time; mengirim token sebagai pesan pertama
+8. **Koneksi WebSocket:** `APIClient.start_ws()` meng-establish WebSocket persisten ke `/ws/progress` untuk pembaruan progress real-time
 
 ### Siklus Hidup Download
 
@@ -390,9 +389,9 @@ DownloadTask.start()  [berjalan di thread daemon]
 | `PATCH` | `/downloads/{task_id}/resume` | Ya | Lanjutkan download yang dijeda/terputus |
 | `DELETE` | `/downloads/{task_id}` | Ya | Hapus download + opsi parts |
 | `PATCH` | `/downloads/{task_id}/remove_history` | Ya | Hapus permanen dari riwayat |
-| `GET` | `/settings` | Ya | Dapatkan pengaturan saat ini (token di-mask) |
-| `PUT` | `/settings` | Ya | Perbarui pengaturan (modifikasi token diblokir) |
-| `WS` | `/ws/progress` | Ya (pesan pertama) | Broadcast progress real-time |
+| `GET` | `/settings` | Ya | Dapatkan pengaturan saat ini |
+| `PUT` | `/settings` | Ya | Perbarui pengaturan |
+| `WS` | `/ws/progress` | Ya | Broadcast progress real-time |
 
 ### Dependensi
 
@@ -418,7 +417,6 @@ Konfigurasi disimpan di `%APPDATA%\AsynxDL\config.json`:
 {
   "app_version": "1.0.0",
   "api_port": 58296,
-  "api_secret_token": "<uuid-otomatis-dibuat>",
   "default_download_path": "%USERPROFILE%\\Downloads",
   "max_threads_per_download": 8,
   "max_concurrent_downloads": 3,

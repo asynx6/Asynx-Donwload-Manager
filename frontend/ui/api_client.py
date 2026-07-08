@@ -2,8 +2,7 @@
 
 Audit-fix v1.0.x:
     - Semua method publik ``except`` di-``try/except`` dan envelope-error.
-    - Token deps otomatis dimuat dari config (HMAC compare_digest
-      server-side cocok).
+    - Localhost-only app, tidak ada auth/token.
 """
 
 import json
@@ -24,7 +23,6 @@ class APIClient:
     def __init__(self, host: str = "127.0.0.1", port: int = 58296):
         self.host = host
         self.port = port
-        self._token = ""
         self._base_url = f"http://{host}:{port}"
         self._ws_url = f"ws://{host}:{port}/ws/progress"
         self._ws: Optional[websocket.WebSocketApp] = None
@@ -33,17 +31,8 @@ class APIClient:
         self._running = False
 
     # ---------------------------------------------------------------- helpers
-    def _load_token(self) -> str:
-        if not self._token:
-            try:
-                self._token = load_config().get("api_secret_token", "")
-            except Exception:
-                self._token = ""
-        return self._token
-
     def headers(self) -> dict:
-        return {"X-AsynxDL-Token": self._load_token(),
-                "Content-Type": "application/json"}
+        return {"Content-Type": "application/json"}
 
     def _envelope_err(self, op: str, exc: Exception) -> dict:
         msg = f"{type(exc).__name__}: {exc}".strip()
@@ -165,7 +154,6 @@ class APIClient:
         if self._running:
             return
         self._running = True
-        token = self._load_token()
 
         def on_message(ws, message):
             try:
@@ -180,8 +168,7 @@ class APIClient:
 
         def on_open(ws):
             try:
-                ws.send(token)  # Kirim token sebagai pesan pertama
-                ws.send("ping")  # Kirim ping setelah token terverifikasi
+                ws.send("ping")
             except Exception:
                 pass
 
@@ -189,7 +176,7 @@ class APIClient:
             while self._running:
                 try:
                     self._ws = websocket.WebSocketApp(
-                        self._ws_url,  # Token dihapus dari query parameter
+                        self._ws_url,
                         on_message=on_message,
                         on_open=on_open,
                     )

@@ -2,11 +2,6 @@ const API_HOST = 'http://127.0.0.1:58296';
 
 let currentData = { url: '', filename: '', size: 0, suggestedSavePath: '' };
 
-async function getToken() {
-  const res = await chrome.storage.local.get('token');
-  return res.token || '';
-}
-
 function formatSize(bytes) {
   if (!bytes || bytes === 0) return 'Unknown size';
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -54,18 +49,12 @@ async function browsePath() {
 }
 
 async function startDownload() {
-  const token = await getToken();
-  if (!token) {
-    showError('Token not set. Open extension options and paste your AsynxDL token.');
-    return;
-  }
   const savePath = document.getElementById('save-path').textContent || '';
   try {
     const resp = await fetch(`${API_HOST}/downloads/add`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'X-AsynxDL-Token': token
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         url: currentData.url,

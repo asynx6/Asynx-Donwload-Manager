@@ -37,7 +37,7 @@ class SplashWindow:
         # Logo image
         self._logo_label = None
         try:
-            logo_path = os.path.join(os.path.dirname(__file__), "assets", "icons", "logo.png")
+            logo_path = os.path.join(os.path.dirname(__file__), "assets", "icons", "icons.png")
             if os.path.exists(logo_path):
                 logo_img = ctk.CTkImage(Image.open(logo_path), size=(64, 64))
                 self._logo_label = ctk.CTkLabel(self._root, image=logo_img, text="")

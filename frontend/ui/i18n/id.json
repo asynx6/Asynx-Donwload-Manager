@@ -105,8 +105,8 @@
     "subtitle": "Mari siapkan download manager-mu dalam beberapa langkah",
     "language": "Pilih Bahasa",
     "download_path": "Folder Unduhan Default",
-    "token_title": "Token Ekstensi",
-    "token_desc": "Salin token ini ke halaman pengaturan ekstensi untuk menghubungkan browser.",
+    "ready_title": "Semua Siap",
+    "ready_desc": "AsynxDL sudah siap digunakan. Klik Mulai untuk membuka aplikasi.",
     "startup": "Jalankan AsynxDL saat Windows mulai",
     "finish": "Mulai"
   },

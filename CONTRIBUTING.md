@@ -27,7 +27,7 @@ Thank you for your interest in making AsynxDL better! This document explains how
    ```
 3. **Install dependencies**:
    ```powershell
-   python -m pip install -r requirements.txt
+   pip install -r requirements.txt
    ```
 4. **Run the app from source**:
    ```powershell

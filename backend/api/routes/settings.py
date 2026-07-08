@@ -1,24 +1,22 @@
 """
 AsynxDL — Settings Routes
 ~~~~~~~~~~~~~~~~~~~~~~~~~
-GET & PUT /settings dengan autentikasi.
+GET & PUT /settings.
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
-from backend.api.auth import verify_token
 from backend.api.models import SettingsModel
 from backend.api.state import manager
 from backend.system.config import load_config, save_config
 from backend.system.startup import set_startup
 
-router = APIRouter(dependencies=[Depends(verify_token)])
+router = APIRouter()
 
 
 @router.get("", response_model=SettingsModel)
 async def get_settings():
     config = load_config()
-    # Mask token untuk keamanan: jangan expose full secret di UI
     return SettingsModel(**config)
 
 
@@ -26,10 +24,6 @@ async def get_settings():
 async def put_settings(settings: SettingsModel):
     config = load_config()
     update = settings.model_dump(exclude_unset=True)
-    # SECURITY #11: Jangan izinkan perubahan token via PUT.
-    # Token hanya boleh di-generate via endpoint terpisah.
-    if "api_secret_token" in update:
-        del update["api_secret_token"]
     config.update(update)
     save_config(config)
 

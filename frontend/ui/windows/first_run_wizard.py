@@ -76,7 +76,7 @@ class FirstRunWizard(ctk.CTkToplevel):
                                        corner_radius=theme.CORNER_NONE)
         self._dots_frame.grid(row=0, column=2, sticky="e", padx=(0, 12), pady=8)
         self._dot_labels = []
-        for i in range(3):
+        for i in range(2):
             lbl = ctk.CTkLabel(self._dots_frame, text="□",
                               font=theme.font(13, bold=True), text_color=tk["FG2"])
             lbl.grid(row=0, column=i, padx=2)
@@ -122,10 +122,7 @@ class FirstRunWizard(ctk.CTkToplevel):
     def _load_logo(self, size: int):
         try:
             candidates = [
-                r"C:\Users\asynx\Downloads\AsynxDL\Logo.png",
-                os.path.join(os.path.dirname(__file__), "..", "assets", "icons", "logo.png"),
-                os.path.join(os.path.dirname(__file__), "..", "assets", "icons", "logo.jpg"),
-                os.path.join(os.path.dirname(__file__), "..", "assets", "icons", "tray.png"),
+                os.path.join(os.path.dirname(__file__), "..", "assets", "icons", "icons.png"),
             ]
             for path in candidates:
                 if path and os.path.exists(path):
@@ -227,34 +224,17 @@ class FirstRunWizard(ctk.CTkToplevel):
                 corner_radius=theme.CORNER_NONE,
             ).grid(row=3, column=0, sticky="w", padx=14, pady=(4, 14))
 
-        elif self._step == 2:
-            # Token display
-            token = self._config.get("api_secret_token", "")
-            ctk.CTkLabel(self._container, text=t("wizard.token_title"),
+        elif self._step == 1:
+            # Final step — show a short "ready" summary
+            ctk.CTkLabel(self._container, text=t("wizard.ready_title", default="You're all set"),
                         font=theme.font(12, bold=True), text_color=tk["FG"],
                         anchor="w").grid(row=0, column=0, sticky="w",
                                          padx=14, pady=(14, 4))
-            ctk.CTkLabel(self._container, text=t("wizard.token_desc"),
+            ctk.CTkLabel(self._container, text=t("wizard.ready_desc",
+                        default="AsynxDL is ready to use. Click Get Started to open the app."),
                         wraplength=560, justify="left", font=theme.font(10),
                         text_color=tk["FG2"], anchor="w").grid(
                             row=1, column=0, sticky="w", padx=14, pady=(4, 12))
-            entry = ctk.CTkEntry(
-                self._container, height=theme.INPUT_HEIGHT,
-                corner_radius=theme.CORNER_NONE, font=theme.font(11),
-                fg_color=tk["BG3"], text_color=tk["FG"],
-                border_width=1, border_color=tk["BORDER2"],
-            )
-            entry.grid(row=2, column=0, sticky="ew", padx=14, pady=(4, 12))
-            entry.insert(0, token)
-            entry.configure(state="readonly")
-            ctk.CTkButton(
-                self._container, text=t("btn.copy", default="Copy"),
-                width=100, height=theme.INPUT_HEIGHT, corner_radius=theme.CORNER_NONE,
-                font=theme.font(11, bold=True),
-                fg_color="transparent", hover_color=tk["SEL_DEEP"],
-                text_color=tk["FG"], border_width=1, border_color=tk["BORDER"],
-                command=lambda: self._copy(entry),
-            ).grid(row=3, column=0, sticky="w", padx=14, pady=(4, 14))
             try:
                 self._btn_next.configure(text=t("wizard.finish"))
             except Exception:

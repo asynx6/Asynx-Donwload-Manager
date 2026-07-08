@@ -4,14 +4,13 @@ AsynxDL — Downloads Routes
 CRUD endpoint untuk download queue.
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from pydantic import BaseModel
 
-from backend.api.auth import verify_token
 from backend.api.models import AddDownloadRequest, DownloadItem
 from backend.api.state import manager
 
-router = APIRouter(dependencies=[Depends(verify_token)])
+router = APIRouter()
 
 
 @router.post("/add", response_model=DownloadItem)

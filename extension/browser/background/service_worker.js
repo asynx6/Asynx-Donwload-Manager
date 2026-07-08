@@ -76,12 +76,8 @@ chrome.downloads.onCreated.addListener(async (item) => {
 });
 
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.get('token', (res) => {
-    if (!res.token) {
-      chrome.action.setBadgeText({ text: '!' });
-      chrome.action.setBadgeBackgroundColor({ color: '#C62828' });
-    }
-  });
+  // Token tidak diperlukan lagi — langsung ready
+  chrome.action.setBadgeText({ text: '' });
 });
 
 chrome.action.onClicked.addListener(() => {

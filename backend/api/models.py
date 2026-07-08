@@ -93,10 +93,9 @@ class DownloadItem(BaseModel):
 
 
 class SettingsModel(BaseModel):
-    """GET /settings response (mask token)."""
+    """GET /settings response model."""
 
     api_port: int = 58296
-    api_secret_token: str = ""
     default_download_path: str = ""
     max_threads_per_download: int = 8
     max_concurrent_downloads: int = 3

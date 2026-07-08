@@ -1,14 +1,9 @@
-"""AsynxDL — FastAPI Middleware: rate limit + token defense.
+"""AsynxDL — FastAPI Middleware: header defense.
 
 Audit-fix v1.1.0:
-    - RateLimitMiddleware: maks 60 req/menit per peer (default). Backed by
-      thread-safe LRU counter dict (bounded untuk menghindari memory leak).
-    - HeaderDefenseMiddleware: opsional helper Untuk blokir Origin/Referer
-      mencurigakan.
-
-Middleware ini dipasang di server.create_app() ANTARA CORS dan router supaya
-token dependency (yang dipasang di level router via per-route ``Depends``)
-tetap menjadi single source of truth untuk auth.
+    - HeaderDefenseMiddleware: blokir Origin/Referer mencurigakan.
+      (Rate limit + token auth DIHAPUS — app bind 127.0.0.1 saja,
+      tidak ada attack surface dari luar.)
 """
 
 import threading
@@ -94,7 +89,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
 
 class HeaderDefenseMiddleware(BaseHTTPMiddleware):
-    """Reject Host/Origin header mencurigakan. Token-defense shields deps."""
+    """Reject Host/Origin header mencurigakan (localhost-only defense)."""
 
     def __init__(self, app: ASGIApp):
         super().__init__(app)

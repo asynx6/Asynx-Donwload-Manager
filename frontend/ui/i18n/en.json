@@ -101,8 +101,8 @@
     "subtitle": "Let's set up your download manager in a few steps",
     "language": "Choose Language",
     "download_path": "Default Download Folder",
-    "token_title": "Extension Token",
-    "token_desc": "Copy this token into the extension options page to pair your browser.",
+    "ready_title": "You're all set",
+    "ready_desc": "AsynxDL is ready to use. Click Get Started to open the app.",
     "startup": "Run AsynxDL when Windows starts",
     "finish": "Get Started"
   },

@@ -43,12 +43,13 @@ def create_app() -> FastAPI:
     # Rate limit DIHAPUS — AsynxDL bind 127.0.0.1 saja (localhost only),
     # tidak ada attack surface dari network luar. Rate limit cuma bikin
     # masalah saat user download banyak file sekaligus.
+    # Token auth juga DIHAPUS — localhost-only app tidak butuh auth.
     app.add_middleware(HeaderDefenseMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://127.0.0.1"],
         allow_methods=["GET", "POST", "PATCH", "DELETE", "PUT"],
-        allow_headers=["X-AsynxDL-Token", "Content-Type"],
+        allow_headers=["Content-Type"],
         allow_credentials=False,
     )
 

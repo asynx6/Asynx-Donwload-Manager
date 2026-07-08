@@ -1,7 +1,7 @@
 # AsynxDL — Advanced Download Manager
 
 <p align="center">
-  <img src="frontend/ui/assets/icons/logo.png" alt="AsynxDL Logo" width="96">
+  <img src="frontend\ui\assets\icons\logo.png" alt="AsynxDL Logo" width="96">
 </p>
 
 <p align="center">
@@ -48,7 +48,7 @@ Pre-built installer and portable executable are available in the [Releases](http
 3. Choose whether to create a desktop shortcut.
 4. Launch **AsynxDL** from the Start Menu or desktop shortcut.
 
-> **Note:** The installer installs the app to `%LOCALAPPDATA%\Programs\AsynxDL` and stores your settings in `%APPDATA%\AsynxDL`. On first launch, the app shows a setup wizard to choose language, default download folder, and copy the secret token for the browser extension. The uninstaller removes the program directory, app data, and any leftover `.parts` folder automatically.
+> **Note:** The installer installs the app to `%LOCALAPPDATA%\Programs\AsynxDL` and stores your settings in `%APPDATA%\AsynxDL`. On first launch, the app shows a setup wizard to choose language and default download folder. The uninstaller removes the program directory, app data, and any leftover `.parts` folder automatically.
 
 ### Option B: Portable Executable
 
@@ -75,8 +75,7 @@ AsynxDL ships with a Chromium-based browser extension (Manifest V3). It works wi
 1. Open your browser and go to the extensions page (`chrome://extensions/` or `edge://extensions/`).
 2. Enable **Developer mode** (toggle in the top-right corner).
 3. Click **Load unpacked** and select the folder `extension/browser/` (or `%LOCALAPPDATA%\Programs\AsynxDL\extension` after installation).
-4. Open the AsynxDL desktop app, go through the first-run wizard, and copy the **Secret Token**.
-5. Click the AsynxDL extension icon → **Options**, paste the token, and click **Save Token**.
+4. Open the AsynxDL desktop app. The extension connects to the local API automatically — no token needed.
 
 After setup, the extension will intercept downloads in your browser and ask you to confirm them in the AsynxDL app.
 
@@ -157,7 +156,7 @@ AsynxDL is a native Windows download manager engineered to solve a specific prob
 
 AsynxDL exists at the intersection of three architectural decisions:
 
-1. **Local-first, self-contained architecture.** The application runs a FastAPI HTTP server on `127.0.0.1:58296` as a daemon thread within the Python process. This local API serves as the single coordination point between the download engine (backend), the desktop UI (frontend), and the browser extension. No cloud services, no external dependencies at runtime. The API is protected by an auto-generated HMAC token (`X-AsynxDL-Token` header) with constant-time comparison to prevent timing attacks.
+1. **Local-first, self-contained architecture.** The application runs a FastAPI HTTP server on `127.0.0.1:58296` as a daemon thread within the Python process. This local API serves as the single coordination point between the download engine (backend), the desktop UI (frontend), and the browser extension. No cloud services, no external dependencies at runtime. The API binds to localhost only (`127.0.0.1`), so it is not reachable from the network — no authentication is required.
 
 2. **Chunk-based parallel downloading with intelligent adaptation.** Rather than streaming a file in a single connection, AsynxDL probes the server for `Content-Length` and `Accept-Ranges`, calculates an optimal chunk count using a size-based heuristic (4 chunks for files <1MB, up to 32 for files >10GB), and distributes work across a `ThreadPoolExecutor`. Each chunk is downloaded independently, written to a pre-allocated `.part` file in `%LOCALAPPDATA%\AsynxDL\.parts`, and merged with checksum verification (SHA-256, MD5, ETag) after completion. The system dynamically adapts thread count based on observed throughput, detects server-side throttling via rolling-window bandwidth analysis, and can failover to mirror/CDN candidates automatically.
 
@@ -217,8 +216,8 @@ The download engine (`backend/core/downloader.py` → `DownloadTask`) orchestrat
 
 | Layer | Mechanism |
 |-------|-----------|
-| **Authentication** | HMAC constant-time token comparison (`hmac.compare_digest`) on `X-AsynxDL-Token` header; token generated as UUID on first run; placeholder/empty tokens are rejected |
-| **Rate Limiting** | Sliding-window rate limiter: 60 requests/minute per IP, with LRU bucket eviction after 5 minutes of inactivity |
+| **Authentication** | None required — the API binds to `127.0.0.1` only and is not reachable from the network |
+| **Rate Limiting** | None — localhost-only app, no external attack surface |
 | **Host Defense** | `HeaderDefenseMiddleware` rejects requests with `Host` headers not matching `127.0.0.1`/`localhost`/`0.0.0.0` |
 | **Path Traversal** | Pydantic `field_validator` rejects `..` traversal, null bytes, device paths (`\\.\`), and UNC paths (`\\server\share`) in `save_path` and `filename` |
 | **SSRF Prevention** | Mirror selector validates that candidate hostnames do not resolve to private/loopback IP addresses |
@@ -232,7 +231,7 @@ The download engine (`backend/core/downloader.py` → `DownloadTask`) orchestrat
 - **Download Card:** Shows filename, status text, progress bar, speed/size/ETA info, and action buttons (Pause/Resume/Cancel/Open Folder/Run/Remove History) — all context-sensitive based on download state.
 - **Settings Panel:** Form fields for default download path, speed limit, language (English/Indonesian), theme, and run-on-startup toggle.
 - **Add Download Modal:** URL input with real-time validation, speed limit field, and "Start Download" button.
-- **First-Run Wizard:** 3-step setup — language selection → download path + startup preference → secret token display for browser extension.
+- **First-Run Wizard:** 2-step setup — language selection → download path + startup preference.
 - **System Tray:** Minimize to tray with dynamic icon state (idle=blue, active=green, blocked=red); tray menu with Show/Pause All/Settings/Quit; balloon notification when downloads are running.
 - **WebSocket Progress:** Real-time progress updates pushed from the backend via `ws://127.0.0.1:58296/ws/progress`, eliminating polling overhead.
 - **Multi-language:** Full i18n support via JSON translation files (`frontend/ui/i18n/en.json`, `id.json`); runtime language switching without restart.
@@ -241,8 +240,8 @@ The download engine (`backend/core/downloader.py` → `DownloadTask`) orchestrat
 
 - **Download Interception:** `chrome.downloads.onCreated` listener cancels native Chrome downloads and relays them to the desktop app via `POST /downloads/add`.
 - **Service Worker:** Background service worker (`background/service_worker.js`) handles interception, backend health checking, and popup triggering.
-- **Popup UI:** Confirmation dialog showing intercepted filename, size, and save path; sends download to backend with token authentication.
-- **Options Page:** Token configuration page for pasting the secret token from the desktop app.
+- **Popup UI:** Confirmation dialog showing intercepted filename, size, and save path; sends download to backend via `POST /downloads/add`.
+- **Options Page:** Info page explaining the extension connects locally with no token required.
 - **Backend Health Check:** Extension pings `/status` before intercepting to ensure the desktop app is running.
 
 ### System Integration
@@ -323,10 +322,10 @@ This ensures the application survives PyInstaller's `os.execv` restart path (use
 2. **Single Instance Check:** `_is_another_instance_running(port)` probes the TCP port; if occupied, signals existing window via Win32 and exits
 3. **Server Launch:** `start_server_thread(port)` spawns a daemon thread running `uvicorn.run(app, host="127.0.0.1", port=58296)`
 4. **Backend Readiness:** `_wait_for_backend(timeout=10)` polls with aggressive backoff (50ms → 50ms → 100ms → 200ms → 300ms steps); combines socket probe + HTTP GET to `/status`
-5. **First-Run Wizard:** If `first_run_completed` is False in config, displays a 3-step wizard (language → path/startup → token)
+5. **First-Run Wizard:** If `first_run_completed` is False in config, displays a 2-step wizard (language → path/startup)
 6. **UI Launch:** `AsynxDLApp` initializes CustomTkinter root, loads theme, centers window, and renders `MainWindow` with Home/Settings tabs
 7. **Tray Registration:** On window close, `TrayIcon` is created with dynamic state provider; runs in a background thread via `pystray`
-8. **WebSocket Connection:** `APIClient.start_ws()` establishes persistent WebSocket to `/ws/progress` for real-time download progress; sends token as first message
+8. **WebSocket Connection:** `APIClient.start_ws()` establishes persistent WebSocket to `/ws/progress` for real-time download progress
 
 ### Download Lifecycle
 
@@ -391,9 +390,9 @@ DownloadTask.start()  [runs in daemon thread]
 | `PATCH` | `/downloads/{task_id}/resume` | Yes | Resume paused/interrupted download |
 | `DELETE` | `/downloads/{task_id}` | Yes | Delete download + optional parts |
 | `PATCH` | `/downloads/{task_id}/remove_history` | Yes | Permanently remove from history |
-| `GET` | `/settings` | Yes | Get current settings (token masked) |
-| `PUT` | `/settings` | Yes | Update settings (token modification blocked) |
-| `WS` | `/ws/progress` | Yes (first message) | Real-time progress broadcast |
+| `GET` | `/settings` | Yes | Get current settings |
+| `PUT` | `/settings` | Yes | Update settings |
+| `WS` | `/ws/progress` | Yes | Real-time progress broadcast |
 
 ### Dependencies
 
@@ -419,7 +418,6 @@ Configuration is stored at `%APPDATA%\AsynxDL\config.json`:
 {
   "app_version": "1.0.0",
   "api_port": 58296,
-  "api_secret_token": "<auto-generated-uuid>",
   "default_download_path": "%USERPROFILE%\\Downloads",
   "max_threads_per_download": 8,
   "max_concurrent_downloads": 3,

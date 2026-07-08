@@ -1,12 +1,11 @@
 """
 AsynxDL — System Configuration Module
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Manajemen konfigurasi aplikasi: first-run token generation, load/save config.
+Manajemen konfigurasi aplikasi: load/save config.
 """
 
 import json
 import os
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +13,6 @@ from typing import Any
 DEFAULT_CONFIG = {
     "app_version": "1.0.0",
     "api_port": 58296,
-    "api_secret_token": "AUTO_GENERATED_ON_FIRST_RUN",
     "default_download_path": os.path.expandvars("%USERPROFILE%\\Downloads"),
     "max_threads_per_download": 8,
     "max_concurrent_downloads": 3,
@@ -36,8 +34,7 @@ def _config_path() -> Path:
     return _config_dir() / "config.json"
 
 
-def generate_secret_token() -> str:
-    return str(uuid.uuid4())
+
 
 
 def load_config() -> dict[str, Any]:
@@ -45,8 +42,6 @@ def load_config() -> dict[str, Any]:
     path = _config_path()
     if not path.exists():
         config = DEFAULT_CONFIG.copy()
-        config["api_secret_token"] = generate_secret_token()
-        save_config(config)
         return config
 
     try:
@@ -54,8 +49,6 @@ def load_config() -> dict[str, Any]:
             config = json.load(f)
     except (json.JSONDecodeError, OSError):
         config = DEFAULT_CONFIG.copy()
-        config["api_secret_token"] = generate_secret_token()
-        save_config(config)
         return config
 
     # Merge dengan default untuk field baru
